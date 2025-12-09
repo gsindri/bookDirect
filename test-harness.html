@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking.com Test Harness</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f2f2f2;
+            padding: 20px;
+        }
+
+        .hotel-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        /* Mimic Booking.com styles for the selectors we found */
+        .d2fee87262 {
+            /* Hotel Name */
+            font-size: 24px;
+            font-weight: bold;
+            color: #262626;
+            margin-bottom: 10px;
+        }
+
+        [data-testid="price-and-discounted-price"] {
+            /* Price */
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            background: #e7fde9;
+            /* Slight green tint often used for deals */
+            padding: 5px;
+            display: inline-block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="hotel-container">
+        <h1>Booking.com Mock Page</h1>
+        <hr>
+
+        <!-- Hotel Name Mock -->
+        <h2 class="d2fee87262">Warwick New York</h2>
+
+        <p>Some hotel description text...</p>
+
+        <!-- Price Mock -->
+        <div style="margin-top: 20px;">
+            <div>Price for 1 night:</div>
+            <div data-testid="price-and-discounted-price">
+                US$350
+            </div>
+        </div>
+
+        <!-- Placeholder for where our extension might inject content -->
+        <div id="bookDirect-root" style="margin-top: 30px; border: 1px dashed #ccc; padding: 10px;">
+            <em>Extension injection area (See bottom right for actual UI)</em>
+        </div>
+    </div>
+
+    <!-- Load the component -->
+    <script src="src/components/PriceCheckUI.js"></script>
+
+    <!-- Simulation Script: Mimics content.js logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // 1. Selector Config (mimicking AGENT.md discoveries)
+            const SELECTORS = {
+                hotelName: 'h2.d2fee87262',
+                price: '[data-testid="price-and-discounted-price"]'
+            };
+
+            // 2. Find Elements
+            const nameEl = document.querySelector(SELECTORS.hotelName);
+            const priceEl = document.querySelector(SELECTORS.price);
+
+            const hotelName = nameEl ? nameEl.innerText.trim() : 'Not Found';
+            const price = priceEl ? priceEl.innerText.trim() : 'Not Found';
+
+            console.log('Detected Hotel:', hotelName);
+            console.log('Detected Price:', price);
+
+            // 3. Inject Component
+            const app = document.createElement('price-check-ui');
+            app.setAttribute('hotel-name', hotelName);
+            app.setAttribute('price', price);
+
+            document.body.appendChild(app);
+        });
+    </script>
