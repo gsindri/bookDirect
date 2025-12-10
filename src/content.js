@@ -22,7 +22,10 @@
                 '#hp_hotel_name',
                 '.pp-header__title',
                 '.hp__hotel-name',
-                '[data-testid="header-title"]'
+                '[data-testid="header-title"]',
+                'h2.d2fee87262',
+                '#hp_hotel_name_header',
+                'h2' // Fallback: The first H2 on the details page is almost always the title
             ],
             price: [
                 '.prco-valign-middle-helper',
