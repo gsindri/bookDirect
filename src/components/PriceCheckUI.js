@@ -129,6 +129,43 @@ class PriceCheckUI extends HTMLElement {
       button:hover {
         background: #00224f;
       }
+
+      .secondary-link {
+        text-align: center;
+        margin-top: 8px;
+        font-size: 12px;
+        color: #666;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+      
+      .secondary-link:hover {
+        color: #003580;
+      }
+      
+      .toast {
+        visibility: hidden;
+        min-width: 250px;
+        background-color: #333;
+        color: #fff;
+        text-align: center;
+        border-radius: 4px;
+        padding: 12px;
+        position: fixed;
+        z-index: 10000;
+        left: 50%;
+        bottom: 30px;
+        transform: translateX(-50%);
+        font-size: 14px;
+        opacity: 0;
+        transition: opacity 0.3s, bottom 0.3s;
+      }
+      
+      .toast.show {
+        visibility: visible;
+        opacity: 1;
+        bottom: 50px;
+      }
     `;
 
     const html = `
@@ -149,6 +186,8 @@ class PriceCheckUI extends HTMLElement {
             <span class="value price">${this._price}</span>
           </div>
           <button id="draft-email">Draft Negotiation Email</button>
+          <div id="open-gmail" class="secondary-link">Open in Gmail</div>
+          <div id="toast" class="toast">Screenshot copied! Paste it in your email.</div>
         </div>
       </div>
     `;
@@ -157,8 +196,90 @@ class PriceCheckUI extends HTMLElement {
 
     // Bind events
     this._shadowRoot.getElementById('draft-email').addEventListener('click', () => {
-      alert('Drafting email feature coming soon!'); // Placeholder
+      this.draftEmail();
     });
+
+    this._shadowRoot.getElementById('open-gmail').addEventListener('click', () => {
+      this.openGmail();
+    });
+  }
+
+  draftEmail() {
+    const { subject, body } = this.getEmailContent();
+
+    // 1. Copy to Clipboard
+    this.copyToClipboard();
+
+    // 2. Open Email Client
+    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  }
+
+  openGmail() {
+    const { subject, body } = this.getEmailContent();
+    this.copyToClipboard();
+
+    // Gmail compose URL
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(gmailUrl, '_blank');
+  }
+
+  getEmailContent() {
+    const subject = `Question about booking directly`;
+    const body = `Hi there,\n\nI'm looking to book a room at your hotel. I saw you listed on Booking.com for ${this._price}, but I'd much rather book directly with you so you don't have to pay their commission fees.\n\nIf I book directly right now, could you offer a better rate or maybe throw in breakfast?\n\nThanks,`;
+    return { subject, body };
+  }
+
+  async copyToClipboard() {
+    // 1. Copy Screenshot
+    try {
+      await this.captureAndCopyScreenshot();
+      this.showToast();
+    } catch (e) {
+      console.error('Screenshot copy failed', e);
+      // Fallback to text if screenshot fails
+      const clipText = `Found on Booking.com for ${this._price}`;
+      navigator.clipboard.writeText(clipText);
+    }
+  }
+
+  captureAndCopyScreenshot() {
+    return new Promise((resolve, reject) => {
+      // Detect if we are in Test Harness (Mock Mode)
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
+        console.log('bookDirect: Mock Mode - Copying mock data');
+        const mockBlob = new Blob([' [Mock Screenshot Data] '], { type: 'text/plain' });
+        const item = new ClipboardItem({ 'text/plain': mockBlob });
+        navigator.clipboard.write([item]).then(resolve).catch(reject);
+        return;
+      }
+
+      // Real Extension Mode
+      chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
+        if (chrome.runtime.lastError || !response || !response.success) {
+          reject(chrome.runtime.lastError || response?.error);
+          return;
+        }
+
+        try {
+          // Convert Base64 to Blob
+          const res = await fetch(response.dataUrl);
+          const blob = await res.blob();
+
+          // Write to clipboard
+          const item = new ClipboardItem({ [blob.type]: blob });
+          await navigator.clipboard.write([item]);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+  }
+
+  showToast() {
+    const toast = this._shadowRoot.getElementById('toast');
+    toast.className = 'toast show';
+    setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
   }
 
   truncate(str, n) {
