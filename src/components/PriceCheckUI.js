@@ -1,44 +1,20 @@
-class PriceCheckUI extends HTMLElement {
-  constructor() {
-    super();
-    this._shadowRoot = this.attachShadow({ mode: 'closed' }); // Closed shadow DOM to prevent external styles interfering
-    this._hotelName = 'Unknown Hotel';
-    this._price = 'N/A';
-  }
+// Factory function to create the UI
+window.BookDirect = window.BookDirect || {};
 
-  static get observedAttributes() {
-    return ['hotel-name', 'price'];
-  }
+window.BookDirect.createUI = function (hotelName, price) {
+  const container = document.createElement('div');
+  const shadowRoot = container.attachShadow({ mode: 'closed' });
 
-  attributeChangedCallback(name, oldValue, newValue) {
-    if (name === 'hotel-name') {
-      this._hotelName = newValue;
-    }
-    if (name === 'price') {
-      this._price = newValue;
-    }
-    this.render();
-  }
+  // Internal state
+  let _hotelName = hotelName;
+  let _price = price;
 
-  set hotelName(value) {
-    this.setAttribute('hotel-name', value);
-  }
-
-  set price(value) {
-    this.setAttribute('price', value);
-  }
-
-  connectedCallback() {
-    this.render();
-  }
-
-  render() {
-    const style = `
-      :host {
+  const style = `
+      :host, .host-wrapper {
         position: fixed;
         bottom: 20px;
         right: 20px;
-        z-index: 9999;
+        z-index: 2147483647; /* Max z-index */
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
       
@@ -168,124 +144,104 @@ class PriceCheckUI extends HTMLElement {
       }
     `;
 
-    const html = `
-      <div class="container">
-        <div class="header">
-          <div class="logo">
-            <span class="logo-icon"></span>
-            bookDirect
-          </div>
-        </div>
-        <div class="content">
-          <div class="info-row">
-            <span class="label">Hotel:</span>
-            <span class="value" title="${this._hotelName}">${this.truncate(this._hotelName, 20)}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Current Price:</span>
-            <span class="value price">${this._price}</span>
-          </div>
-          <button id="draft-email">Draft Negotiation Email</button>
-          <div id="open-gmail" class="secondary-link">Open in Gmail</div>
-          <div id="toast" class="toast">Screenshot copied! Paste it in your email.</div>
+  const html = `
+      <div class="host-wrapper">
+        <div class="container">
+            <div class="header">
+            <div class="logo">
+                <span class="logo-icon"></span>
+                bookDirect
+            </div>
+            </div>
+            <div class="content">
+            <div class="info-row">
+                <span class="label">Hotel:</span>
+                <span class="value" title="${_hotelName}">${truncate(_hotelName, 20)}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">Current Price:</span>
+                <span class="value price">${_price}</span>
+            </div>
+            <button id="draft-email">Draft Negotiation Email</button>
+            <div id="open-gmail" class="secondary-link">Open in Gmail</div>
+            <div id="toast" class="toast">Screenshot copied! Paste it in your email.</div>
+            </div>
         </div>
       </div>
     `;
 
-    this._shadowRoot.innerHTML = `<style>${style}</style>${html}`;
+  shadowRoot.innerHTML = `<style>${style}</style>${html}`;
 
-    // Bind events
-    this._shadowRoot.getElementById('draft-email').addEventListener('click', () => {
-      this.draftEmail();
-    });
-
-    this._shadowRoot.getElementById('open-gmail').addEventListener('click', () => {
-      this.openGmail();
-    });
+  // HELPER FUNCTIONS (Internal)
+  function truncate(str, n) {
+    return (str.length > n) ? str.substr(0, n - 1) + '&hellip;' : str;
   }
 
-  draftEmail() {
-    const { subject, body } = this.getEmailContent();
-
-    // 1. Copy to Clipboard
-    this.copyToClipboard();
-
-    // 2. Open Email Client
-    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
-  }
-
-  openGmail() {
-    const { subject, body } = this.getEmailContent();
-    this.copyToClipboard();
-
-    // Gmail compose URL
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.open(gmailUrl, '_blank');
-  }
-
-  getEmailContent() {
+  function getEmailContent() {
     const subject = `Question about booking directly`;
-    const body = `Hi there,\n\nI'm looking to book a room at your hotel. I saw you listed on Booking.com for ${this._price}, but I'd much rather book directly with you so you don't have to pay their commission fees.\n\nIf I book directly right now, could you offer a better rate or maybe throw in breakfast?\n\nThanks,`;
+    const body = `Hi there,\n\nI'm looking to book a room at your hotel. I saw you listed on Booking.com for ${_price}, but I'd much rather book directly with you so you don't have to pay their commission fees.\n\nIf I book directly right now, could you offer a better rate or maybe throw in breakfast?\n\nThanks,`;
     return { subject, body };
   }
 
-  async copyToClipboard() {
-    // 1. Copy Screenshot
-    try {
-      await this.captureAndCopyScreenshot();
-      this.showToast();
-    } catch (e) {
-      console.error('Screenshot copy failed', e);
-      // Fallback to text if screenshot fails
-      const clipText = `Found on Booking.com for ${this._price}`;
-      navigator.clipboard.writeText(clipText);
-    }
+  function showToast() {
+    const toast = shadowRoot.getElementById('toast');
+    toast.className = 'toast show';
+    setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
   }
 
-  captureAndCopyScreenshot() {
+  function captureAndCopyScreenshot() {
     return new Promise((resolve, reject) => {
-      // Detect if we are in Test Harness (Mock Mode)
       if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
-        console.log('bookDirect: Mock Mode - Copying mock data');
+        console.log('bookDirect: Mock Mode');
         const mockBlob = new Blob([' [Mock Screenshot Data] '], { type: 'text/plain' });
         const item = new ClipboardItem({ 'text/plain': mockBlob });
         navigator.clipboard.write([item]).then(resolve).catch(reject);
         return;
       }
 
-      // Real Extension Mode
       chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
         if (chrome.runtime.lastError || !response || !response.success) {
           reject(chrome.runtime.lastError || response?.error);
           return;
         }
-
         try {
-          // Convert Base64 to Blob
           const res = await fetch(response.dataUrl);
           const blob = await res.blob();
-
-          // Write to clipboard
           const item = new ClipboardItem({ [blob.type]: blob });
           await navigator.clipboard.write([item]);
           resolve();
-        } catch (err) {
-          reject(err);
-        }
+        } catch (err) { reject(err); }
       });
     });
   }
 
-  showToast() {
-    const toast = this._shadowRoot.getElementById('toast');
-    toast.className = 'toast show';
-    setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
+  async function copyToClipboard() {
+    try {
+      await captureAndCopyScreenshot();
+      showToast();
+    } catch (e) {
+      console.error('Screenshot copy failed', e);
+      const clipText = `Found on Booking.com for ${_price}`;
+      navigator.clipboard.writeText(clipText);
+    }
   }
 
-  truncate(str, n) {
-    return (str.length > n) ? str.substr(0, n - 1) + '&hellip;' : str;
+  function draftEmail() {
+    const { subject, body } = getEmailContent();
+    copyToClipboard();
+    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
   }
-}
 
-// Define the custom element
-customElements.define('price-check-ui', PriceCheckUI);
+  function openGmail() {
+    const { subject, body } = getEmailContent();
+    copyToClipboard();
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(gmailUrl, '_blank');
+  }
+
+  // Bind events
+  shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
+  shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
+
+  return container;
+};
