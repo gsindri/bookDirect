@@ -2,19 +2,35 @@
     console.log('bookDirect: Content script started');
 
     const SELECTORS = {
-        hotelName: [
-            'h2.pp-header__title',
-            '[data-testid="header-title"]',
-            '.hp__hotel-name',
-            'h2.d2fee87262' // Old fallback
-        ],
-        price: [
-            '[data-testid="price-and-discounted-price"]', // Tag agnostic
-            '.bui-price-display__value',
-            '.prco-valign-middle-helper',
-            '.prco-text-nowrap-helper',
-            '[class*="price_display"]' // Wildcard match
-        ]
+        search: {
+            hotelName: [
+                'h2.pp-header__title',
+                '[data-testid="header-title"]',
+                '.hp__hotel-name',
+                'h2.d2fee87262'
+            ],
+            price: [
+                '[data-testid="price-and-discounted-price"]',
+                '.bui-price-display__value',
+                '.prco-valign-middle-helper',
+                '.prco-text-nowrap-helper',
+                '[class*="price_display"]'
+            ]
+        },
+        details: {
+            hotelName: [
+                '#hp_hotel_name',
+                '.pp-header__title',
+                '.hp__hotel-name',
+                '[data-testid="header-title"]'
+            ],
+            price: [
+                '.prco-valign-middle-helper',
+                '.bui-price-display__value',
+                '[data-testid="price-and-discounted-price"]',
+                '.prco-text-nowrap-helper'
+            ]
+        }
     };
 
     function findElement(selectorList) {
@@ -26,13 +42,22 @@
     }
 
     function findData() {
-        const nameEl = findElement(SELECTORS.hotelName);
-        const priceEl = findElement(SELECTORS.price);
+        // Strategy 1: Hotel Details Page (specific ID often present)
+        let nameEl = findElement(SELECTORS.details.hotelName);
+        let priceEl = findElement(SELECTORS.details.price);
+        let pageType = 'details';
 
-        if (!nameEl) console.log('bookDirect: Hotel Name not found. Checked:', SELECTORS.hotelName);
-        if (!priceEl) console.log('bookDirect: Price not found. Checked:', SELECTORS.price);
+        // Strategy 2: Search Page fallback (if Details specific failed, or we are on search)
+        // Note: some classes overlap, but Details usually has #hp_hotel_name
+        if (!nameEl && !priceEl) {
+            nameEl = findElement(SELECTORS.search.hotelName);
+            priceEl = findElement(SELECTORS.search.price);
+            pageType = 'search';
+        }
 
-        // Keep trying if not found (simple polling for this phase)
+        if (!nameEl) console.log(`bookDirect: Hotel Name not found (${pageType})`);
+        if (!priceEl) console.log(`bookDirect: Price not found (${pageType})`);
+
         if (!nameEl || !priceEl) {
             return null;
         }
