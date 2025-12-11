@@ -8,6 +8,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   // Internal state
   let _hotelName = hotelName;
   let _price = price;
+  let _roomDetails = '';
 
   const baseStyle = isSidebar ? `
       :host, .host-wrapper {
@@ -198,7 +199,13 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
   function getEmailContent() {
     const subject = `Question about booking directly`;
-    const body = `Hi there,\n\nI'm looking to book a room at your hotel. I saw you listed on Booking.com for ${_price}, but I'd much rather book directly with you so you don't have to pay their commission fees.\n\nIf I book directly right now, could you offer a better rate or maybe throw in breakfast?\n\nThanks,`;
+    let body = `Hi there,\n\nI'm looking to book a room at your hotel. I saw you listed on Booking.com for ${_price}, but I'd much rather book directly with you so you don't have to pay their commission fees.\n\n`;
+
+    if (_roomDetails) {
+      body += `I'm interested in:\n${_roomDetails}\n\n`;
+    }
+
+    body += `If I book directly right now, could you offer a better rate or maybe throw in breakfast?\n\nThanks,`;
     return { subject, body };
   }
 
@@ -262,7 +269,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
   shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
 
-  // Expose update method
+  // Expose update methods
   container.updatePrice = function (newPrice) {
     _price = newPrice;
     const priceEl = shadowRoot.querySelector('.value.price');
@@ -276,6 +283,10 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         priceEl.style.color = '#008009'; // Back to green
       }, 500);
     }
+  };
+
+  container.updateDetails = function (details) {
+    _roomDetails = details;
   };
 
   return container;
