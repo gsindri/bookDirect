@@ -9,7 +9,8 @@
         "clipboardWrite"
     ],
     "host_permissions": [
-        "*://*.booking.com/*"
+        "*://*.booking.com/*",
+        "<all_urls>"
     ],
     "background": {
         "service_worker": "src/background.js"
