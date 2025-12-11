@@ -28,13 +28,7 @@
                 '[data-testid="header-title"]',
                 'h2.d2fee87262',
                 '#hp_hotel_name_header',
-                'h2' // Fallback
-            ],
-            // 1. Sidebar CTA Box
-            sidebar: [
-                '.hprt-reservation-cta',
-                'div[data-component="hotel/new-rooms-table/reservation-cta"]',
-                '#reservation_cta_box'
+                'h2'
             ],
             // 2. The DYNAMIC Grand Total (Priority)
             totalPrice: [
@@ -45,7 +39,8 @@
                 '.bui-price-display__value',
                 '[data-testid="price-and-discounted-price"]',
                 '.bui-heading--large',
-                'span[class*="total_price"]'
+                'span[class*="total_price"]',
+                '.hprt-reservation-total-price' // One more variation
             ],
             // 3. Fallback / "Cheapest" Price
             fallbackPrice: [
@@ -70,7 +65,6 @@
 
     // --- STRATEGY 1: SEARCH RESULTS (Fixed Position) ---
     function handleSearchPage() {
-        // Only run if we are NOT on a details page (check specific details IDs to verify)
         if (document.getElementById('hp_hotel_name')) return false;
 
         const nameEl = findElement(SELECTORS.search.hotelName);
@@ -81,9 +75,6 @@
                 hotelName: nameEl.innerText.trim(),
                 price: priceEl.innerText.trim()
             };
-            console.log('bookDirect: Search Page Detected', data);
-
-            // Fixed Position Injection
             if (!app && window.BookDirect) {
                 app = window.BookDirect.createUI(data.hotelName, data.price, false);
                 document.body.appendChild(app);
@@ -95,96 +86,100 @@
 
     // --- STRATEGY 2: DETAILS PAGE (Sidebar Injection) ---
     function handleDetailsPage() {
-        // 1. ANCHOR: The Sidebar Container (Constant)
-        // This container exists even if the price inside is missing.
-        const sidebar = findElement(SELECTORS.details.sidebar);
-        if (!sidebar) return false;
+        // 1. ANCHOR: The "I'll Reserve" Button
+        // We find the button first, then find its MAIN container (Scope)
+        const button = document.querySelector('.js-reservation-button') ||
+            document.querySelector('button[type="submit"].hprt-reservation-cta__book') ||
+            document.querySelector('button[type="submit"]');
+
+        if (!button) return false;
+
+        // Traverse UP to find the main sidebar block
+        // We look for a parent that contains the whole right-side reservation block
+        // .hprt-reservation-cta is usually the small box. We want the parent .hprt-block or similar.
+        let scope = button.closest('.hprt-block') ||
+            button.closest('.hprt-reservation-cta') ||
+            button.closest('aside') ||
+            button.parentNode.parentNode; // Fallback
+
+        if (!scope) {
+            console.log('bookDirect: Scope not found, using body');
+            scope = document.body;
+        }
+
+        // DEBUG: Visualize the Scope
+        scope.style.border = '2px dashed blue'; // BLUE DASHED = SEARCH AREA
 
         const nameEl = findElement(SELECTORS.details.hotelName);
         const hotelName = nameEl ? nameEl.innerText.trim() : 'Hotel';
 
-        // Core Logic: Determine which price to show
         function getBestPrice() {
-            // A. Try to find the Grand Total in Sidebar
-            // We search for multiple possible selectors
-            let totalEl = findElement(SELECTORS.details.totalPrice, sidebar);
+            // Search inside the expanded SCOPE
+            let totalEl = findElement(SELECTORS.details.totalPrice, scope);
 
-            // Check if it's a valid price element
+            // Validation: Must be visible and have numbers
             if (totalEl && isVisible(totalEl) && /\d/.test(totalEl.innerText)) {
-                // SUCCESS: Dynamic Price Found
-                totalEl.style.border = '3px solid #00FF00'; // GREEN for Success
+                // SUCCESS
+                totalEl.style.border = '3px solid #00FF00'; // GREEN
 
-                // Clear fallback border if it exists
+                // Clear fallback
                 const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
                 if (fallbackEl) fallbackEl.style.outline = '';
 
-                console.log('bookDirect: Using Sidebar Total', totalEl.innerText);
                 return totalEl.innerText.trim();
             }
 
-            // B. Fallback: Lead Price from Table
+            // FALLBACK
             const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
             if (fallbackEl) {
-                // FALLBACK MODE
-                fallbackEl.style.outline = '3px solid #FF0000'; // RED for Fallback
-
-                // Clear sidebar border if it (somehow) exists
+                fallbackEl.style.outline = '3px solid #FF0000'; // RED
                 if (totalEl) totalEl.style.border = '';
-
-                console.log('bookDirect: Using Fallback Price', fallbackEl.innerText);
                 return fallbackEl.innerText.trim();
             }
 
             return 'Select Room';
         }
 
-        // 1. Initial Injection
         const initialPrice = getBestPrice();
 
         if (!app && window.BookDirect) {
             app = window.BookDirect.createUI(hotelName, initialPrice, true);
-            // Inject at TOP of sidebar so it's always visible
-            sidebar.insertBefore(app, sidebar.firstElementChild);
+
+            // Injection Point: We still want to be near the button
+            // If scope is big, find the button wrapper again to inject "above" it
+            const injectionTarget = button.parentElement;
+            injectionTarget.insertBefore(app, injectionTarget.firstElementChild);
         } else if (app && app.updatePrice) {
             app.updatePrice(initialPrice);
         }
 
-        // 2. The Hunter Observer
-        // Watch the entire sidebar for additions/removals of the price element
+        // Observer on the SCOPE (Broader watch)
         if (app && app.updatePrice) {
             const observer = new MutationObserver(() => {
                 const currentPrice = getBestPrice();
                 app.updatePrice(currentPrice);
             });
-
-            // Subtree is critical because the price might be deep inside a new div
-            observer.observe(sidebar, { subtree: true, childList: true, characterData: true });
+            observer.observe(scope, { subtree: true, childList: true, characterData: true });
         }
 
         return true;
     }
 
-
     function inject() {
-        if (window.hasBookDirectInjected) return; // Simple check
+        if (window.hasBookDirectInjected) return;
         if (!window.BookDirect) return;
 
-        // Try Details Page First (More specific)
         if (handleDetailsPage()) {
             window.hasBookDirectInjected = true;
             return;
         }
 
-        // Try Search Page Fallback
         if (handleSearchPage()) {
             window.hasBookDirectInjected = true;
             return;
         }
-
-        console.log('bookDirect: No recognized page data yet...');
     }
 
-    // Poll for a bit (Booking.com is dynamic)
     const interval = setInterval(() => {
         if (window.hasBookDirectInjected) {
             clearInterval(interval);
