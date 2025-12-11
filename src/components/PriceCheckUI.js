@@ -247,7 +247,12 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         // STEP A & B: Scrape & Inject
         const dateEl = document.querySelector('[data-testid="searchbox-dates-container"]') ||
           document.querySelector('.sb-date-field__display'); // fallback
-        const sidebarEl = document.querySelector('.hprt-reservation-cta') ||
+
+        // TARGETING FIX: Anchor to the same button content.js uses to ensure we get the main sidebar (with price)
+        // and not a sticky footer or secondary element.
+        const reserveBtn = document.querySelector('.js-reservation-button');
+        const sidebarEl = (reserveBtn && reserveBtn.closest('.hprt-reservation-cta')) ||
+          document.querySelector('.hprt-reservation-cta') ||
           document.querySelector('.hprt-price-block') ||
           document.body; // absolute fallback
 
