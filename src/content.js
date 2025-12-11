@@ -36,12 +36,16 @@
                 'div[data-component="hotel/new-rooms-table/reservation-cta"]',
                 '#reservation_cta_box'
             ],
-            // 2. The DYNAMIC Gland Total (Priority)
+            // 2. The DYNAMIC Grand Total (Priority)
             totalPrice: [
-                '.js-reservation-total-price', // Top Priority
+                '.js-reservation-total-price',
                 '.hprt-reservation-total__price',
+                '.hprt-price-price',
                 '[data-component="hotel/new-rooms-table/reservation-cta"] .bui-price-display__value',
-                '.bui-price-display__value'
+                '.bui-price-display__value',
+                '[data-testid="price-and-discounted-price"]',
+                '.bui-heading--large',
+                'span[class*="total_price"]'
             ],
             // 3. Fallback / "Cheapest" Price
             fallbackPrice: [
@@ -91,96 +95,70 @@
 
     // --- STRATEGY 2: DETAILS PAGE (Sidebar Injection) ---
     function handleDetailsPage() {
-        // 1. ANCHOR: The "I'll Reserve" Button
-        // It's the most stable element in the sidebar.
-        // We look for button type='submit' inside the sidebar container.
+        // 1. ANCHOR: The Sidebar Container (Constant)
+        // This container exists even if the price inside is missing.
         const sidebar = findElement(SELECTORS.details.sidebar);
         if (!sidebar) return false;
 
         const nameEl = findElement(SELECTORS.details.hotelName);
         const hotelName = nameEl ? nameEl.innerText.trim() : 'Hotel';
 
-        // Helper: Find price relative to button
-        // The price usually lives in a container just before the button part of the form
-        function findPriceRelativeToButton() {
-            // Try to find the button first
-            const button = sidebar.querySelector('.js-reservation-button') ||
-                sidebar.querySelector('button[type="submit"]');
+        // Core Logic: Determine which price to show
+        function getBestPrice() {
+            // A. Try to find the Grand Total in Sidebar
+            // We search for multiple possible selectors
+            let totalEl = findElement(SELECTORS.details.totalPrice, sidebar);
 
-            if (!button) {
-                console.log('bookDirect: Button anchor not found');
-                return null;
-            }
+            // Check if it's a valid price element
+            if (totalEl && isVisible(totalEl) && /\d/.test(totalEl.innerText)) {
+                // SUCCESS: Dynamic Price Found
+                totalEl.style.border = '3px solid #00FF00'; // GREEN for Success
 
-            // Look up the tree for the "Total" container. 
-            // It's usually a sibling or cousin of the button's wrapper.
-            // We search the whole sidebar for anything that looks like a large price.
-            // But we prioritize ELEMENTS closer to the button? 
-            // Actually, let's just use specific selectors inside the sidebar but apply the DEBUG BORDER.
-
-            const possiblePrices = [
-                '.js-reservation-total-price',
-                '.hprt-reservation-total__price',
-                '.hprt-price-price',
-                '[data-component="hotel/new-rooms-table/reservation-cta"] .bui-price-display__value',
-                '.bui-heading--large',
-                'span[class*="total_price"]'
-            ];
-
-            for (let sel of possiblePrices) {
-                const el = sidebar.querySelector(sel);
-                if (el && isVisible(el) && /\d/.test(el.innerText)) {
-                    return el;
-                }
-            }
-            return null;
-        }
-
-        function updatePriceLogic() {
-            // Find price element
-            let priceEl = findPriceRelativeToButton();
-            let activePrice = '';
-
-            if (priceEl) {
-                // VISUAL DEBUGGING: RED BORDER
-                // This confirms to the user "We found THIS element"
-                priceEl.style.border = '3px solid red';
-                activePrice = priceEl.innerText.trim();
-                console.log('bookDirect: Found Price (DEBUG)', activePrice);
-            } else {
-                // Fallback
+                // Clear fallback border if it exists
                 const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
-                // Also apply debug border to fallback if used?
-                if (fallbackEl) fallbackEl.style.border = '3px solid orange';
+                if (fallbackEl) fallbackEl.style.outline = '';
 
-                activePrice = fallbackEl ? fallbackEl.innerText.trim() : 'Select Room';
-                console.log('bookDirect: Using Fallback Price', activePrice);
+                console.log('bookDirect: Using Sidebar Total', totalEl.innerText);
+                return totalEl.innerText.trim();
             }
 
-            return { activePrice, priceEl };
+            // B. Fallback: Lead Price from Table
+            const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
+            if (fallbackEl) {
+                // FALLBACK MODE
+                fallbackEl.style.outline = '3px solid #FF0000'; // RED for Fallback
+
+                // Clear sidebar border if it (somehow) exists
+                if (totalEl) totalEl.style.border = '';
+
+                console.log('bookDirect: Using Fallback Price', fallbackEl.innerText);
+                return fallbackEl.innerText.trim();
+            }
+
+            return 'Select Room';
         }
 
-        // Initial check
-        const { activePrice } = updatePriceLogic();
+        // 1. Initial Injection
+        const initialPrice = getBestPrice();
 
         if (!app && window.BookDirect) {
-            app = window.BookDirect.createUI(hotelName, activePrice, true);
+            app = window.BookDirect.createUI(hotelName, initialPrice, true);
+            // Inject at TOP of sidebar so it's always visible
             sidebar.insertBefore(app, sidebar.firstElementChild);
         } else if (app && app.updatePrice) {
-            app.updatePrice(activePrice);
+            app.updatePrice(initialPrice);
         }
 
-        // RE-APLY OBSERVER to the Sidebar Container
-        // We watch the whole sidebar subtree because the price element is often destroyed and recreated
+        // 2. The Hunter Observer
+        // Watch the entire sidebar for additions/removals of the price element
         if (app && app.updatePrice) {
             const observer = new MutationObserver(() => {
-                // Re-run the logic
-                const { activePrice } = updatePriceLogic();
-                app.updatePrice(activePrice);
+                const currentPrice = getBestPrice();
+                app.updatePrice(currentPrice);
             });
 
-            // Watch everything in sidebar
-            observer.observe(sidebar, { subtree: true, childList: true, characterData: true, attributes: true });
+            // Subtree is critical because the price might be deep inside a new div
+            observer.observe(sidebar, { subtree: true, childList: true, characterData: true });
         }
 
         return true;
