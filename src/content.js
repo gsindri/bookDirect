@@ -108,7 +108,7 @@
         }
 
         // DEBUG: Visualize the Scope
-        scope.style.border = '2px dashed blue'; // BLUE DASHED = SEARCH AREA
+        // scope.style.border = '2px dashed blue'; // REMOVED FOR PRODUCTION
 
         const nameEl = findElement(SELECTORS.details.hotelName);
         const hotelName = nameEl ? nameEl.innerText.trim() : 'Hotel';
@@ -120,7 +120,7 @@
             // Validation: Must be visible and have numbers
             if (totalEl && isVisible(totalEl) && /\d/.test(totalEl.innerText)) {
                 // SUCCESS
-                totalEl.style.border = '3px solid #00FF00'; // GREEN
+                // totalEl.style.border = '3px solid #00FF00'; // REMOVED FOR PRODUCTION
 
                 // Clear fallback
                 const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
@@ -132,7 +132,7 @@
             // FALLBACK
             const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
             if (fallbackEl) {
-                fallbackEl.style.outline = '3px solid #FF0000'; // RED
+                // fallbackEl.style.outline = '3px solid #FF0000'; // REMOVED FOR PRODUCTION
                 if (totalEl) totalEl.style.border = '';
                 return fallbackEl.innerText.trim();
             }
