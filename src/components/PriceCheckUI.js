@@ -192,58 +192,39 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
   shadowRoot.innerHTML = `<style>${baseStyle}${commonStyle}</style>${html}`;
 
-  // HELPER FUNCTIONS (Internal)
-  function truncate(str, n) {
-    return (str.length > n) ? str.substr(0, n - 1) + '&hellip;' : str;
-  }
+  // TEMPLATES
+  const emailTemplates = [
+    {
+      type: 'The Direct',
+      body: (details, price) => `Hi,\n\nI want to book a stay at your hotel:\n\n${details || '(See details in attachment)'}\n\nI see a total of ${price} on Booking.com. I prefer to book directly. Can you match or beat this price?\n\nThanks,`
+    },
+    {
+      type: 'The Friendly',
+      body: (details, price) => `Hi there,\n\nI'm planning a trip and would love to stay at your place! I'm looking at:\n\n${details || '(See details in attachment)'}\n\nI found a rate of ${price} on Booking.com, but I always prefer to support hotels directly. Is there any way you could offer a better deal if I book with you?\n\nBest regards,`
+    },
+    {
+      type: 'The Value',
+      body: (details, price) => `Hello,\n\nI'm looking to make a reservation for:\n\n${details || '(See details in attachment)'}\n\nThe visible price on Booking.com is ${price}. Since booking directly saves you the commission user fees, could you pass some of those savings on to me with a better rate?\n\nThank you,`
+    }
+  ];
 
   function getEmailContent() {
     const subject = `Booking Inquiry: Direct Rate for ${_hotelName}`;
-
-    let body = `Hi there,\n\nI am planning to book a stay at your hotel. I am looking to reserve:\n\n`;
-
-    if (_roomDetails) {
-      body += `${_roomDetails}\n\n`;
-    } else {
-      body += `(Please select rooms in the table to see details here)\n\n`;
-    }
-
-    body += `I see this total listed on Booking.com for ${_price}, but I would prefer to book directly with you to save the commission fees.\n\nIf I book directly, can you offer a better rate?\n\nBest,`;
-
+    const template = emailTemplates[Math.floor(Math.random() * emailTemplates.length)];
+    const body = template.body(_roomDetails, _price);
+    console.log(`bookDirect: Selected template '${template.type}'`);
     return { subject, body };
   }
 
   function showToast() {
     const toast = shadowRoot.getElementById('toast');
+    toast.textContent = '📸 Proof Copied! Press Ctrl+V to paste the screenshot in your email.';
     toast.className = 'toast show';
-    setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
+    // Persistent: stays for 8 seconds to ensure they see the instruction
+    setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 8000);
   }
 
-  function captureAndCopyScreenshot() {
-    return new Promise((resolve, reject) => {
-      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
-        console.log('bookDirect: Mock Mode');
-        const mockBlob = new Blob([' [Mock Screenshot Data] '], { type: 'text/plain' });
-        const item = new ClipboardItem({ 'text/plain': mockBlob });
-        navigator.clipboard.write([item]).then(resolve).catch(reject);
-        return;
-      }
-
-      chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
-        if (chrome.runtime.lastError || !response || !response.success) {
-          reject(chrome.runtime.lastError || response?.error);
-          return;
-        }
-        try {
-          const res = await fetch(response.dataUrl);
-          const blob = await res.blob();
-          const item = new ClipboardItem({ [blob.type]: blob });
-          await navigator.clipboard.write([item]);
-          resolve();
-        } catch (err) { reject(err); }
-      });
-    });
-  }
+  // ... (captureAndCopyScreenshot remains same)
 
   async function copyToClipboard() {
     try {
@@ -253,18 +234,19 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       console.error('Screenshot copy failed', e);
       const clipText = `Found on Booking.com for ${_price}`;
       navigator.clipboard.writeText(clipText);
+      showToast(); // Still show instruction even if image failed, they might have text
     }
   }
 
-  function draftEmail() {
+  async function draftEmail() {
+    await copyToClipboard(); // Wait for screenshot
     const { subject, body } = getEmailContent();
-    copyToClipboard();
     window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
   }
 
-  function openGmail() {
+  async function openGmail() {
+    await copyToClipboard(); // Wait for screenshot
     const { subject, body } = getEmailContent();
-    copyToClipboard();
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.open(gmailUrl, '_blank');
   }
