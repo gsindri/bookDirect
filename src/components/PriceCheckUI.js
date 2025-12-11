@@ -239,16 +239,74 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         return;
       }
 
+      // STEP A & B: Scrape & Inject
+      const dateEl = document.querySelector('[data-testid="searchbox-dates-container"]') ||
+        document.querySelector('.sb-date-field__display'); // fallback
+      const sidebarEl = document.querySelector('.hprt-reservation-cta') ||
+        document.querySelector('.hprt-price-block') ||
+        document.body; // absolute fallback
+
+      let injectedDiv = null;
+      let rect = null;
+
+      if (dateEl && sidebarEl) {
+        const dateText = dateEl.innerText;
+        injectedDiv = document.createElement('div');
+        injectedDiv.style.cssText = 'background:#fff; color:#333; font-weight:bold; padding:8px; margin-bottom:10px; border:1px solid #ccc; font-size:14px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.1);';
+        injectedDiv.innerText = `Dates: ${dateText.replace(/\n/g, ' ')}`;
+        sidebarEl.prepend(injectedDiv);
+
+        // Measure with injected div
+        rect = sidebarEl.getBoundingClientRect();
+      } else {
+        // Fallback: just capture the whole body logic or some default area if sidebar not found
+        // For now, let's just default to visible tab if no sidebar found, but we want cropping.
+        // If no sidebar, we might just capture the center of the screen? Let's assume sidebar exists for now as per task.
+        if (sidebarEl) rect = sidebarEl.getBoundingClientRect();
+      }
+
+      // Force layout msg
+      // STEP C: Capture
       chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
+        // STEP D: Cleanup immediately
+        if (injectedDiv) injectedDiv.remove();
+
         if (chrome.runtime.lastError || !response || !response.success) {
           reject(chrome.runtime.lastError || response?.error);
           return;
         }
+
         try {
           const res = await fetch(response.dataUrl);
           const blob = await res.blob();
-          const item = new ClipboardItem({ [blob.type]: blob });
-          await navigator.clipboard.write([item]);
+          const imageBitmap = await createImageBitmap(blob);
+
+          // Canvas for cropping
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+
+          // Handle DPR
+          const dpr = window.devicePixelRatio || 1;
+
+          // If we successfully identified a sidebar area to crop
+          if (rect && rect.width > 0 && rect.height > 0) {
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+
+            ctx.drawImage(imageBitmap,
+              rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
+              0, 0, canvas.width, canvas.height // Dest
+            );
+
+            const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+            const item = new ClipboardItem({ 'image/png': croppedBlob });
+            await navigator.clipboard.write([item]);
+          } else {
+            // Fallback: copy full image if no rect
+            const item = new ClipboardItem({ [blob.type]: blob });
+            await navigator.clipboard.write([item]);
+          }
+
           resolve();
         } catch (err) { reject(err); }
       });
