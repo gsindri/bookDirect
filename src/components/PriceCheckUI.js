@@ -250,11 +250,27 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
         // TARGETING FIX: Anchor to the same button content.js uses to ensure we get the main sidebar (with price)
         // and not a sticky footer or secondary element.
-        const reserveBtn = document.querySelector('.js-reservation-button');
-        const sidebarEl = (reserveBtn && reserveBtn.closest('.hprt-reservation-cta')) ||
-          document.querySelector('.hprt-reservation-cta') ||
-          document.querySelector('.hprt-price-block') ||
-          document.body; // absolute fallback
+        const reserveBtn = document.querySelector('.js-reservation-button') ||
+          document.querySelector('button[type="submit"].hprt-reservation-cta__book');
+
+        let sidebarEl = null;
+
+        if (reserveBtn) {
+          // Traverse UP to find the main sidebar block
+          // .hprt-reservation-cta might be too small (just the button area).
+          // .hprt-block usually wraps the whole sidebar.
+          sidebarEl = reserveBtn.closest('.hprt-block') ||
+            reserveBtn.closest('aside') ||
+            reserveBtn.closest('.hprt-reservation-cta') ||
+            reserveBtn.parentNode.parentNode; // Fallback
+        }
+
+        // Absolute fallback if button not found
+        if (!sidebarEl) {
+          sidebarEl = document.querySelector('.hprt-reservation-cta') ||
+            document.querySelector('.hprt-price-block') ||
+            document.body;
+        }
 
         let injectedDiv = null;
         let rect = null;
