@@ -224,7 +224,36 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 8000);
   }
 
-  // ... (captureAndCopyScreenshot remains same)
+  // HELPER FUNCTIONS (Internal)
+  function truncate(str, n) {
+    return (str.length > n) ? str.substr(0, n - 1) + '&hellip;' : str;
+  }
+
+  function captureAndCopyScreenshot() {
+    return new Promise((resolve, reject) => {
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
+        console.log('bookDirect: Mock Mode');
+        const mockBlob = new Blob([' [Mock Screenshot Data] '], { type: 'text/plain' });
+        const item = new ClipboardItem({ 'text/plain': mockBlob });
+        navigator.clipboard.write([item]).then(resolve).catch(reject);
+        return;
+      }
+
+      chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
+        if (chrome.runtime.lastError || !response || !response.success) {
+          reject(chrome.runtime.lastError || response?.error);
+          return;
+        }
+        try {
+          const res = await fetch(response.dataUrl);
+          const blob = await res.blob();
+          const item = new ClipboardItem({ [blob.type]: blob });
+          await navigator.clipboard.write([item]);
+          resolve();
+        } catch (err) { reject(err); }
+      });
+    });
+  }
 
   async function copyToClipboard() {
     try {
