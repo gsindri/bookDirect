@@ -164,12 +164,24 @@
                     let roomName = '';
 
                     if (row) {
-                        // TARGET SPECIFICS: Prioritize the link or specific name container
-                        const nameLink = row.querySelector('.hprt-roomtype-icon-link') ||
-                            row.querySelector('.hprt-roomtype-name');
+                        // HELPER: Find Room Name (handle rowspan)
+                        let current = row;
+                        while (current) {
+                            const nameLink = current.querySelector('.hprt-roomtype-icon-link') ||
+                                current.querySelector('.hprt-roomtype-name');
+                            if (nameLink) {
+                                roomName = nameLink.innerText.trim();
+                                break;
+                            }
+                            // Move up to find the parent row that 'spans' down
+                            current = current.previousElementSibling;
+                        }
 
-                        if (nameLink) {
-                            roomName = nameLink.innerText.trim();
+                        // EXTRA: Check for "Breakfast included" to differentiate
+                        // Look in the current row's conditions column
+                        const conditions = row.innerText;
+                        if (conditions.toLowerCase().includes('breakfast included')) {
+                            roomName += ' (Breakfast included)';
                         }
                     }
 
