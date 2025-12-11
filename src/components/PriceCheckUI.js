@@ -257,13 +257,28 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
   async function copyToClipboard() {
     try {
+      // FIX: Ensure document has focus for clipboard API
+      window.focus();
+
       await captureAndCopyScreenshot();
       showToast();
     } catch (e) {
       console.error('Screenshot copy failed', e);
-      const clipText = `Found on Booking.com for ${_price}`;
-      navigator.clipboard.writeText(clipText);
-      showToast(); // Still show instruction even if image failed, they might have text
+
+      // If it was a permission/screenshot specific error, show that
+      // Otherwise fall back to text
+      const errorMsg = e.message || e.toString();
+      if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
+        const toast = shadowRoot.getElementById('toast');
+        toast.textContent = '❌ Screenshot failed. Please check permissions.';
+        toast.className = 'toast show';
+        setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
+      } else {
+        // Fallback to text if it's just a general failure (or if we still want to give them something)
+        const clipText = `Found on Booking.com for ${_price}`;
+        navigator.clipboard.writeText(clipText);
+        showToast(); // Still show instruction even if image failed, they might have text
+      }
     }
   }
 
