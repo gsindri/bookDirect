@@ -198,14 +198,18 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   }
 
   function getEmailContent() {
-    const subject = `Question about booking directly`;
-    let body = `Hi there,\n\nI'm looking to book a room at your hotel. I saw you listed on Booking.com for ${_price}, but I'd much rather book directly with you so you don't have to pay their commission fees.\n\n`;
+    const subject = `Booking Inquiry: Direct Rate for ${_hotelName}`;
+
+    let body = `Hi there,\n\nI am planning to book a stay at your hotel. I am looking to reserve:\n\n`;
 
     if (_roomDetails) {
-      body += `I'm interested in:\n${_roomDetails}\n\n`;
+      body += `${_roomDetails}\n\n`;
+    } else {
+      body += `(Please select rooms in the table to see details here)\n\n`;
     }
 
-    body += `If I book directly right now, could you offer a better rate or maybe throw in breakfast?\n\nThanks,`;
+    body += `I see this total listed on Booking.com for ${_price}, but I would prefer to book directly with you to save the commission fees.\n\nIf I book directly, can you offer a better rate?\n\nBest,`;
+
     return { subject, body };
   }
 

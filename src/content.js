@@ -153,13 +153,58 @@
             app.updatePrice(initialPrice);
         }
 
+        function getRoomDetails() {
+            const selects = document.querySelectorAll('.hprt-nos-select, select');
+            let details = [];
+
+            selects.forEach(sel => {
+                if (sel.value && parseInt(sel.value) > 0) {
+                    const count = sel.value;
+                    const row = sel.closest('tr');
+                    let roomName = '';
+
+                    if (row) {
+                        // TARGET SPECIFICS: Prioritize the link or specific name container
+                        const nameLink = row.querySelector('.hprt-roomtype-icon-link') ||
+                            row.querySelector('.hprt-roomtype-name');
+
+                        if (nameLink) {
+                            roomName = nameLink.innerText.trim();
+                        }
+                    }
+
+                    // Fallback check (if empty)
+                    if (!roomName) return;
+
+                    // FILTER: Remove garbage
+                    // 1. Discard if it contains "Max. people" (occupancy info)
+                    if (roomName.includes('Max. people')) return;
+
+                    // 2. Discard if it starts with a number (likely a date row if table structure is weird)
+                    if (/^\d/.test(roomName)) return;
+
+                    details.push(`${count}x ${roomName}`);
+                }
+            });
+
+            return details.join('\n');
+        }
+
         // Observer on the SCOPE (Broader watch)
         if (app && app.updatePrice) {
             const observer = new MutationObserver(() => {
                 const currentPrice = getBestPrice();
                 app.updatePrice(currentPrice);
+
+                // ALSO Update Details
+                const currentDetails = getRoomDetails();
+                if (app.updateDetails) app.updateDetails(currentDetails);
             });
-            observer.observe(scope, { subtree: true, childList: true, characterData: true });
+            observer.observe(scope, { subtree: true, childList: true, characterData: true, attributes: true });
+
+            // Initial Call
+            const initialDetails = getRoomDetails();
+            if (app.updateDetails) app.updateDetails(initialDetails);
         }
 
         return true;
