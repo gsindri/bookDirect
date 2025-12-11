@@ -183,6 +183,16 @@
                         if (conditions.toLowerCase().includes('breakfast included')) {
                             roomName += ' (Breakfast included)';
                         }
+
+                        // EXTRA: Capture Price for this specific row
+                        // Price is usually in the "Price for X nights" column
+                        const priceEl = row.querySelector('.bui-price-display__value') ||
+                            row.querySelector('.prco-valign-middle-helper') ||
+                            row.querySelector('[data-testid="price-and-discounted-price"]');
+
+                        if (priceEl) {
+                            roomName += ` (~${priceEl.innerText.trim()})`;
+                        }
                     }
 
                     // Fallback check (if empty)
