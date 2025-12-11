@@ -5,7 +5,8 @@
     "description": "Helps users on Booking.com by injecting a 'Price Check' UI.",
     "permissions": [
         "activeTab",
-        "scripting"
+        "scripting",
+        "clipboardWrite"
     ],
     "host_permissions": [
         "*://*.booking.com/*"
