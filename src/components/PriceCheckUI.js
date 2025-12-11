@@ -381,7 +381,6 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
                 await navigator.clipboard.write([item]);
               }
 
-              resolve();
             } catch (err) { reject(err); }
           });
         }, 50);
