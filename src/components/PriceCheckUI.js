@@ -1,7 +1,7 @@
 // Factory function to create the UI
 window.BookDirect = window.BookDirect || {};
 
-window.BookDirect.createUI = function (hotelName, price) {
+window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   const container = document.createElement('div');
   const shadowRoot = container.attachShadow({ mode: 'closed' });
 
@@ -9,23 +9,42 @@ window.BookDirect.createUI = function (hotelName, price) {
   let _hotelName = hotelName;
   let _price = price;
 
-  const style = `
+  const baseStyle = isSidebar ? `
+      :host, .host-wrapper {
+        position: relative;
+        width: 100%;
+        margin-top: 10px;
+        margin-bottom: 10px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      .container {
+        width: 100%;
+        box-sizing: border-box; 
+        border-radius: 4px; /* Flatter for sidebar */
+        background: #fff;
+        border: 2px solid #003580; /* Distinct border */
+      }
+    ` : `
       :host, .host-wrapper {
         position: fixed;
         bottom: 20px;
         right: 20px;
-        z-index: 2147483647; /* Max z-index */
+        z-index: 2147483647; 
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
-      
       .container {
+        width: 300px;
+        border-radius: 12px;
         background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.2);
         box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        border-radius: 12px;
+      }
+    `;
+
+  const commonStyle = `
+      .container {
         padding: 16px;
-        width: 300px;
         transition: transform 0.3s ease;
         animation: slideIn 0.5s ease-out;
       }
@@ -170,7 +189,7 @@ window.BookDirect.createUI = function (hotelName, price) {
       </div>
     `;
 
-  shadowRoot.innerHTML = `<style>${style}</style>${html}`;
+  shadowRoot.innerHTML = `<style>${baseStyle}${commonStyle}</style>${html}`;
 
   // HELPER FUNCTIONS (Internal)
   function truncate(str, n) {
@@ -242,6 +261,22 @@ window.BookDirect.createUI = function (hotelName, price) {
   // Bind events
   shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
   shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
+
+  // Expose update method
+  container.updatePrice = function (newPrice) {
+    _price = newPrice;
+    const priceEl = shadowRoot.querySelector('.value.price');
+    if (priceEl) {
+      priceEl.textContent = newPrice;
+
+      // Small animation to show update
+      priceEl.style.transition = 'color 0.3s';
+      priceEl.style.color = '#e2aa11'; // Flash yellow/gold
+      setTimeout(() => {
+        priceEl.style.color = '#008009'; // Back to green
+      }, 500);
+    }
+  };
 
   return container;
 };
