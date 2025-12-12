@@ -332,6 +332,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         let injectedDiv = null;
         let rect = null;
 
+
         if (sidebarEl) {
           // STEP B: Inject Visual Grid
           injectedDiv = createDateGrid(checkIn, checkOut);
@@ -342,48 +343,53 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         }
 
         // STEP C: Capture
-        chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
-          // STEP D: Cleanup immediately (Restore UI & Remove Injection)
-          container.style.display = ''; // Restore visibility
-          if (injectedDiv) injectedDiv.remove();
+        // FIX: Yield to browser to ensure the injected div is painted before capturing
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
+              // STEP D: Cleanup immediately (Restore UI & Remove Injection)
+              container.style.display = ''; // Restore visibility
+              if (injectedDiv) injectedDiv.remove();
 
-          if (chrome.runtime.lastError || !response || !response.success) {
-            reject(chrome.runtime.lastError || response?.error);
-            return;
-          }
+              if (chrome.runtime.lastError || !response || !response.success) {
+                reject(chrome.runtime.lastError || response?.error);
+                return;
+              }
 
-          try {
-            const res = await fetch(response.dataUrl);
-            const blob = await res.blob();
-            const imageBitmap = await createImageBitmap(blob);
+              try {
+                const res = await fetch(response.dataUrl);
+                const blob = await res.blob();
+                const imageBitmap = await createImageBitmap(blob);
 
-            // Canvas for cropping
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+                // Canvas for cropping
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
 
-            // Handle DPR
-            const dpr = window.devicePixelRatio || 1;
+                // Handle DPR
+                const dpr = window.devicePixelRatio || 1;
 
-            // If we successfully identified a sidebar area to crop
-            if (rect && rect.width > 0 && rect.height > 0) {
-              canvas.width = rect.width * dpr;
-              canvas.height = rect.height * dpr;
+                // If we successfully identified a sidebar area to crop
+                if (rect && rect.width > 0 && rect.height > 0) {
+                  canvas.width = rect.width * dpr;
+                  canvas.height = rect.height * dpr;
 
-              ctx.drawImage(imageBitmap,
-                rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
-                0, 0, canvas.width, canvas.height // Dest
-              );
+                  ctx.drawImage(imageBitmap,
+                    rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
+                    0, 0, canvas.width, canvas.height // Dest
+                  );
 
-              const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-              const item = new ClipboardItem({ 'image/png': croppedBlob });
-              await navigator.clipboard.write([item]);
-            } else {
-              // Fallback: copy full image if no rect
-              const item = new ClipboardItem({ [blob.type]: blob });
-              await navigator.clipboard.write([item]);
-            }
-            resolve();
-          } catch (err) { reject(err); }
+                  const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+                  const item = new ClipboardItem({ 'image/png': croppedBlob });
+                  await navigator.clipboard.write([item]);
+                } else {
+                  // Fallback: copy full image if no rect
+                  const item = new ClipboardItem({ [blob.type]: blob });
+                  await navigator.clipboard.write([item]);
+                }
+                resolve();
+              } catch (err) { reject(err); }
+            });
+          });
         });
       }, 50);
     });
