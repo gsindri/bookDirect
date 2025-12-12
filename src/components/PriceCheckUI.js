@@ -354,6 +354,10 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     firstSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     // 2. Highlight the CELL/COLUMN (parent td)
+    // Store references for cleanup
+    const highlightedElements = [];
+
+    // 2. Highlight the CELL/COLUMN (parent td)
     selects.forEach(sel => {
       // Traverse to the table cell (td)
       const cell = sel.closest('td') || sel.parentNode;
@@ -361,15 +365,10 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       if (cell) {
         cell.style.transition = 'background-color 0.2s';
         cell.style.backgroundColor = '#ffebeb'; // The pinkish row highlight
-
         // Also style the select itself slightly to match
         sel.style.border = '1px solid #d4111e';
 
-        // Remove after a few seconds
-        setTimeout(() => {
-          cell.style.backgroundColor = '';
-          sel.style.border = '';
-        }, 4000);
+        highlightedElements.push({ cell, sel });
       }
     });
 
@@ -439,11 +438,27 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     // Show
     requestAnimationFrame(() => { bubble.style.opacity = '1'; });
 
-    // Remove
-    setTimeout(() => {
+    // CLEANUP FUNCTION
+    const clearHighlights = () => {
       bubble.style.opacity = '0';
       setTimeout(() => bubble.remove(), 300);
-    }, 4000);
+
+      highlightedElements.forEach(({ cell, sel }) => {
+        cell.style.backgroundColor = '';
+        sel.style.border = '';
+      });
+    };
+
+    // Auto clear after 4s (Fallback)
+    const timerId = setTimeout(clearHighlights, 4000);
+
+    // Clear on user interaction (Clicking/Changing the select)
+    selects.forEach(sel => {
+      sel.addEventListener('change', () => {
+        clearTimeout(timerId);
+        clearHighlights();
+      }, { once: true });
+    });
 
     return true; // Captured
   }
