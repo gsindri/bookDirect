@@ -696,157 +696,158 @@ Best regards,`;
         }, 500); // Wait 500ms for smooth scroll to settle
       }, 50); // Initial delay before scroll
     });
+  }
 
-    async function copyToClipboard() {
-      try {
-        // FIX: Ensure document has focus for clipboard API
-        window.focus();
+  async function copyToClipboard() {
+    try {
+      // FIX: Ensure document has focus for clipboard API
+      window.focus();
 
-        await captureAndCopyScreenshot();
-        showToast();
-      } catch (e) {
-        console.error('Screenshot copy failed', e);
+      await captureAndCopyScreenshot();
+      showToast();
+    } catch (e) {
+      console.error('Screenshot copy failed', e);
 
-        // If it was a permission/screenshot specific error, show that
-        // Otherwise fall back to text
-        const errorMsg = e.message || e.toString();
-        if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
-          const toast = shadowRoot.getElementById('toast');
-          toast.textContent = '❌ Screenshot failed. Please check permissions.';
-          toast.className = 'toast show';
-          setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
-        } else {
-          // Fallback to text if it's just a general failure (or if we still want to give them something)
-          const clipText = `Found on Booking.com for ${_price}`;
-          navigator.clipboard.writeText(clipText);
-          showToast(); // Still show instruction even if image failed, they might have text
-        }
+      // If it was a permission/screenshot specific error, show that
+      // Otherwise fall back to text
+      const errorMsg = e.message || e.toString();
+      if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
+        const toast = shadowRoot.getElementById('toast');
+        toast.textContent = '❌ Screenshot failed. Please check permissions.';
+        toast.className = 'toast show';
+        setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
+      } else {
+        // Fallback to text if it's just a general failure (or if we still want to give them something)
+        const clipText = `Found on Booking.com for ${_price}`;
+        navigator.clipboard.writeText(clipText);
+        showToast(); // Still show instruction even if image failed, they might have text
       }
     }
+  }
 
-    async function draftEmail() {
-      // VALIDATION: Gatekeeper check
-      if (!_roomDetails || _roomDetails.length === 0) {
-        showError();
-        return;
-      }
-
-      await copyToClipboard(); // Wait for screenshot
-      const { subject, body } = getEmailContent();
-      window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  async function draftEmail() {
+    // VALIDATION: Gatekeeper check
+    if (!_roomDetails || _roomDetails.length === 0) {
+      showError();
+      return;
     }
 
-    async function openGmail() {
-      // VALIDATION: Gatekeeper check
-      if (!_roomDetails || _roomDetails.length === 0) {
-        showError();
-        return;
-      }
+    await copyToClipboard(); // Wait for screenshot
+    const { subject, body } = getEmailContent();
+    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  }
 
-      await copyToClipboard(); // Wait for screenshot
-      const { subject, body } = getEmailContent();
-      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      window.open(gmailUrl, '_blank');
+  async function openGmail() {
+    // VALIDATION: Gatekeeper check
+    if (!_roomDetails || _roomDetails.length === 0) {
+      showError();
+      return;
     }
 
-    // Bind events
-    shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
-    shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
+    await copyToClipboard(); // Wait for screenshot
+    const { subject, body } = getEmailContent();
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(gmailUrl, '_blank');
+  }
 
-    // FETCH HOTEL DETAILS FROM BACKEND (with SMART CACHE)
-    (async function fetchHotelDetails() {
-      try {
-        const cacheKey = `cache_${_hotelName}`;
-        const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  // Bind events
+  shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
+  shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
 
-        // Helper to render buttons from data
-        const renderButtons = (data) => {
-          const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
-          if (!dynamicContainer) return;
+  // FETCH HOTEL DETAILS FROM BACKEND (with SMART CACHE)
+  (async function fetchHotelDetails() {
+    try {
+      const cacheKey = `cache_${_hotelName}`;
+      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-          // Clear existing buttons first
-          dynamicContainer.innerHTML = '';
+      // Helper to render buttons from data
+      const renderButtons = (data) => {
+        const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
+        if (!dynamicContainer) return;
 
-          // Add Official Website button
-          if (data.website) {
-            const websiteBtn = document.createElement('button');
-            websiteBtn.className = 'btn-outline';
-            websiteBtn.textContent = '🌐 Official Website';
-            websiteBtn.addEventListener('click', () => {
-              window.open(data.website, '_blank');
-            });
-            dynamicContainer.appendChild(websiteBtn);
-          }
+        // Clear existing buttons first
+        dynamicContainer.innerHTML = '';
 
-          // Add Phone link
-          if (data.phone) {
-            const phoneLink = document.createElement('a');
-            phoneLink.className = 'phone-link';
-            phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
-            phoneLink.textContent = `📞 ${data.phone}`;
-            dynamicContainer.appendChild(phoneLink);
-          }
-        };
-
-        // STEP A: Check Cache
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          const cached = await chrome.storage.local.get(cacheKey);
-
-          if (cached[cacheKey]) {
-            const { data, timestamp } = cached[cacheKey];
-            const age = Date.now() - timestamp;
-
-            // STEP B (HIT): Use cache if < 30 days old
-            if (age < THIRTY_DAYS_MS && data) {
-              console.log('bookDirect: Using cached hotel data (age:', Math.round(age / 86400000), 'days)');
-              renderButtons(data);
-              return; // Done! No API call needed.
-            }
-          }
+        // Add Official Website button
+        if (data.website) {
+          const websiteBtn = document.createElement('button');
+          websiteBtn.className = 'btn-outline';
+          websiteBtn.textContent = '🌐 Official Website';
+          websiteBtn.addEventListener('click', () => {
+            window.open(data.website, '_blank');
+          });
+          dynamicContainer.appendChild(websiteBtn);
         }
 
-        // STEP C (MISS): Call API
-        console.log('bookDirect: Cache miss, fetching from API...');
-        const apiUrl = `https://hotelfinder.gsindrih.workers.dev/?query=${encodeURIComponent(_hotelName)}`;
-        const response = await fetch(apiUrl);
-
-        if (!response.ok) return; // Fail silently
-
-        const data = await response.json();
-
-        // Save to cache with timestamp
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          chrome.storage.local.set({ [cacheKey]: { data, timestamp: Date.now() } });
-          console.log('bookDirect: Cached hotel data for', _hotelName);
+        // Add Phone link
+        if (data.phone) {
+          const phoneLink = document.createElement('a');
+          phoneLink.className = 'phone-link';
+          phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
+          phoneLink.textContent = `📞 ${data.phone}`;
+          dynamicContainer.appendChild(phoneLink);
         }
+      };
 
-        renderButtons(data);
+      // STEP A: Check Cache
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const cached = await chrome.storage.local.get(cacheKey);
 
-      } catch (e) {
-        // Fail silently - don't show errors to user
-        console.log('bookDirect: Hotel details fetch failed (silent):', e.message);
+        if (cached[cacheKey]) {
+          const { data, timestamp } = cached[cacheKey];
+          const age = Date.now() - timestamp;
+
+          // STEP B (HIT): Use cache if < 30 days old
+          if (age < THIRTY_DAYS_MS && data) {
+            console.log('bookDirect: Using cached hotel data (age:', Math.round(age / 86400000), 'days)');
+            renderButtons(data);
+            return; // Done! No API call needed.
+          }
+        }
       }
-    })();
 
-    // Expose update methods
-    container.updatePrice = function (newPrice) {
-      _price = newPrice;
-      const priceEl = shadowRoot.querySelector('.value.price');
-      if (priceEl) {
-        priceEl.textContent = newPrice;
+      // STEP C (MISS): Call API
+      console.log('bookDirect: Cache miss, fetching from API...');
+      const apiUrl = `https://hotelfinder.gsindrih.workers.dev/?query=${encodeURIComponent(_hotelName)}`;
+      const response = await fetch(apiUrl);
 
-        // Small animation to show update
-        priceEl.style.transition = 'color 0.3s';
-        priceEl.style.color = '#e2aa11'; // Flash yellow/gold
-        setTimeout(() => {
-          priceEl.style.color = '#008009'; // Back to green
-        }, 500);
+      if (!response.ok) return; // Fail silently
+
+      const data = await response.json();
+
+      // Save to cache with timestamp
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ [cacheKey]: { data, timestamp: Date.now() } });
+        console.log('bookDirect: Cached hotel data for', _hotelName);
       }
-    };
 
-    container.updateDetails = function (details) {
-      _roomDetails = details;
-    };
+      renderButtons(data);
 
-    return container;
+    } catch (e) {
+      // Fail silently - don't show errors to user
+      console.log('bookDirect: Hotel details fetch failed (silent):', e.message);
+    }
+  })();
+
+  // Expose update methods
+  container.updatePrice = function (newPrice) {
+    _price = newPrice;
+    const priceEl = shadowRoot.querySelector('.value.price');
+    if (priceEl) {
+      priceEl.textContent = newPrice;
+
+      // Small animation to show update
+      priceEl.style.transition = 'color 0.3s';
+      priceEl.style.color = '#e2aa11'; // Flash yellow/gold
+      setTimeout(() => {
+        priceEl.style.color = '#008009'; // Back to green
+      }, 500);
+    }
   };
+
+  container.updateDetails = function (details) {
+    _roomDetails = details;
+  };
+
+  return container;
+};
