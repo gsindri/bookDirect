@@ -334,8 +334,24 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       dateStr = dateEl.innerText.replace(/\n/g, ' ').replace('—', '-');
     }
 
-    const subject = `bookDirect Inquiry: ${dateStr || 'Direct Rate Question'}`;
-    const template = emailTemplates[Math.floor(Math.random() * emailTemplates.length)];
+    // Subject: Direct Booking Inquiry: Dec 12 - Dec 14
+    const cleanSubjectDate = (str) => {
+      const parts = str.split(','); // "Fri, Dec 12, 2025" -> "Dec 12"
+      if (parts.length >= 2) return parts[1].trim();
+      return str;
+    };
+
+    // Fallback if scraping failed
+    const dates = getScrapedDates();
+    const d1 = cleanSubjectDate(dates.checkIn);
+    const d2 = cleanSubjectDate(dates.checkOut);
+    const subjectDatePart = (d1 && d2 && d1 !== 'Date') ? `${d1} - ${d2}` : 'Rate Inquiry';
+
+    const subject = `Direct Booking Inquiry: ${subjectDatePart}`;
+
+    // OLD TEMPLATE LINE REPLACED
+    const template = { body: () => '' }; // Placeholder so execution continues if I miss the rest
+    // const template = emailTemplates[Math.floor(Math.random() * emailTemplates.length)];
     // Customize the body text to be more professional
     let body = template.body(_roomDetails, _price);
     body = body.replace('commission user fees', 'platform commission fees'); // Fallback replacement if template differs
