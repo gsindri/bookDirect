@@ -745,38 +745,74 @@ Best regards,`;
   shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
   shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
 
-  // FETCH HOTEL DETAILS FROM BACKEND (async, non-blocking)
+  // FETCH HOTEL DETAILS FROM BACKEND (with SMART CACHE)
   (async function fetchHotelDetails() {
     try {
+      const cacheKey = `cache_${_hotelName}`;
+      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+      // Helper to render buttons from data
+      const renderButtons = (data) => {
+        const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
+        if (!dynamicContainer) return;
+
+        // Clear existing buttons first
+        dynamicContainer.innerHTML = '';
+
+        // Add Official Website button
+        if (data.website) {
+          const websiteBtn = document.createElement('button');
+          websiteBtn.className = 'btn-outline';
+          websiteBtn.textContent = '🌐 Official Website';
+          websiteBtn.addEventListener('click', () => {
+            window.open(data.website, '_blank');
+          });
+          dynamicContainer.appendChild(websiteBtn);
+        }
+
+        // Add Phone link
+        if (data.phone) {
+          const phoneLink = document.createElement('a');
+          phoneLink.className = 'phone-link';
+          phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
+          phoneLink.textContent = `📞 ${data.phone}`;
+          dynamicContainer.appendChild(phoneLink);
+        }
+      };
+
+      // STEP A: Check Cache
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const cached = await chrome.storage.local.get(cacheKey);
+
+        if (cached[cacheKey]) {
+          const { data, timestamp } = cached[cacheKey];
+          const age = Date.now() - timestamp;
+
+          // STEP B (HIT): Use cache if < 30 days old
+          if (age < THIRTY_DAYS_MS && data) {
+            console.log('bookDirect: Using cached hotel data (age:', Math.round(age / 86400000), 'days)');
+            renderButtons(data);
+            return; // Done! No API call needed.
+          }
+        }
+      }
+
+      // STEP C (MISS): Call API
+      console.log('bookDirect: Cache miss, fetching from API...');
       const apiUrl = `https://hotelfinder.gsindrih.workers.dev/?query=${encodeURIComponent(_hotelName)}`;
       const response = await fetch(apiUrl);
 
       if (!response.ok) return; // Fail silently
 
       const data = await response.json();
-      const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
 
-      if (!dynamicContainer) return;
-
-      // Add Official Website button
-      if (data.website) {
-        const websiteBtn = document.createElement('button');
-        websiteBtn.className = 'btn-outline';
-        websiteBtn.textContent = '🌐 Official Website';
-        websiteBtn.addEventListener('click', () => {
-          window.open(data.website, '_blank');
-        });
-        dynamicContainer.appendChild(websiteBtn);
+      // Save to cache with timestamp
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ [cacheKey]: { data, timestamp: Date.now() } });
+        console.log('bookDirect: Cached hotel data for', _hotelName);
       }
 
-      // Add Phone link
-      if (data.phone) {
-        const phoneLink = document.createElement('a');
-        phoneLink.className = 'phone-link';
-        phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
-        phoneLink.textContent = `📞 ${data.phone}`;
-        dynamicContainer.appendChild(phoneLink);
-      }
+      renderButtons(data);
 
     } catch (e) {
       // Fail silently - don't show errors to user
