@@ -339,16 +339,12 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     const grid = document.createElement('div');
     grid.style.cssText = 'background:#fff; border:1px solid #e7e7e7; border-radius:8px; padding:12px; margin-bottom:12px; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; box-shadow:0 1px 2px rgba(0,0,0,0.05);';
 
-    // HOTEL NAME (At the top for trust)
+    // HOTEL NAME (At the top for trust - Booking.com style)
     if (hotelName) {
       const hotelHeader = document.createElement('div');
       hotelHeader.innerText = hotelName;
-      hotelHeader.style.cssText = 'font-weight:700; color:#003b95; font-size:18px; margin-bottom:8px; text-align:left;';
+      hotelHeader.style.cssText = 'font-weight:700; color:#1a1a1a; font-size:20px; margin-bottom:8px; text-align:left; line-height:1.3; border-bottom:3px solid #febb02; padding-bottom:8px;';
       grid.appendChild(hotelHeader);
-
-      const divider = document.createElement('div');
-      divider.style.cssText = 'border-bottom:1px solid #e7e7e7; margin-bottom:12px;';
-      grid.appendChild(divider);
     }
 
     const title = document.createElement('div');
