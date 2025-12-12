@@ -10,6 +10,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   let _price = price;
   let _roomDetails = '';
 
+  // Get icon URL (needs to be computed before template)
+  const iconUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
+    ? chrome.runtime.getURL('icons/bookDirect_icon1.png')
+    : '';
+
   const baseStyle = isSidebar ? `
       :host, .host-wrapper {
         position: relative;
@@ -257,7 +262,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         <div class="container">
             <div class="header">
             <div class="logo">
-                <img class="logo-icon" src="${typeof chrome !== 'undefined' && chrome.runtime ? chrome.runtime.getURL('icons/bookDirect_icon1.png') : ''}" alt="">
+                <img class="logo-icon" src="${iconUrl}" alt="">
                 bookDirect
             </div>
             </div>

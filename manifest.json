@@ -39,5 +39,15 @@
         "16": "icons/bookDirect_icon1.png",
         "48": "icons/bookDirect_icon1.png",
         "128": "icons/bookDirect_icon1.png"
-    }
+    },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "icons/bookDirect_icon1.png"
+            ],
+            "matches": [
+                "*://*.booking.com/*"
+            ]
+        }
+    ]
 }
