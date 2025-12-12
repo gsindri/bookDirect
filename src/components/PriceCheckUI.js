@@ -632,213 +632,221 @@ Best regards,`;
           injectedDiv = createDateGrid(checkIn, checkOut, _hotelName);
           sidebarEl.prepend(injectedDiv);
 
-          // Measure
-          rect = sidebarEl.getBoundingClientRect();
+          // STEP B.5: SCROLL INTO VIEW (Critical for captureVisibleTab reliability)
+          // Scroll the sidebar to center of viewport so it's fully visible
+          sidebarEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
         }
 
-        // STEP C: Capture
-        // FIX: Yield to browser to ensure the injected div is painted before capturing
-        requestAnimationFrame(() => {
+        // STEP C: Capture (with delay to let scroll settle)
+        // Wait 500ms for smooth scroll to complete before measuring/capturing
+        setTimeout(() => {
+          // Re-measure after scroll
+          if (sidebarEl) {
+            rect = sidebarEl.getBoundingClientRect();
+          }
+
+          // FIX: Yield to browser to ensure the injected div is painted before capturing
           requestAnimationFrame(() => {
-            chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
-              // STEP D: Cleanup immediately (Restore UI & Remove Injection)
-              container.style.display = ''; // Restore visibility
-              if (injectedDiv) injectedDiv.remove();
+            requestAnimationFrame(() => {
+              chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
+                // STEP D: Cleanup immediately (Restore UI & Remove Injection)
+                container.style.display = ''; // Restore visibility
+                if (injectedDiv) injectedDiv.remove();
 
-              if (chrome.runtime.lastError || !response || !response.success) {
-                reject(chrome.runtime.lastError || response?.error);
-                return;
-              }
-
-              try {
-                const res = await fetch(response.dataUrl);
-                const blob = await res.blob();
-                const imageBitmap = await createImageBitmap(blob);
-
-                // Canvas for cropping
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-
-                // Handle DPR
-                const dpr = window.devicePixelRatio || 1;
-
-                // If we successfully identified a sidebar area to crop
-                if (rect && rect.width > 0 && rect.height > 0) {
-                  canvas.width = rect.width * dpr;
-                  canvas.height = rect.height * dpr;
-
-                  ctx.drawImage(imageBitmap,
-                    rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
-                    0, 0, canvas.width, canvas.height // Dest
-                  );
-
-                  const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-                  const item = new ClipboardItem({ 'image/png': croppedBlob });
-                  await navigator.clipboard.write([item]);
-                } else {
-                  // Fallback: copy full image if no rect
-                  const item = new ClipboardItem({ [blob.type]: blob });
-                  await navigator.clipboard.write([item]);
+                if (chrome.runtime.lastError || !response || !response.success) {
+                  reject(chrome.runtime.lastError || response?.error);
+                  return;
                 }
-                resolve();
-              } catch (err) { reject(err); }
+
+                try {
+                  const res = await fetch(response.dataUrl);
+                  const blob = await res.blob();
+                  const imageBitmap = await createImageBitmap(blob);
+
+                  // Canvas for cropping
+                  const canvas = document.createElement('canvas');
+                  const ctx = canvas.getContext('2d');
+
+                  // Handle DPR
+                  const dpr = window.devicePixelRatio || 1;
+
+                  // If we successfully identified a sidebar area to crop
+                  if (rect && rect.width > 0 && rect.height > 0) {
+                    canvas.width = rect.width * dpr;
+                    canvas.height = rect.height * dpr;
+
+                    ctx.drawImage(imageBitmap,
+                      rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
+                      0, 0, canvas.width, canvas.height // Dest
+                    );
+
+                    const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+                    const item = new ClipboardItem({ 'image/png': croppedBlob });
+                    await navigator.clipboard.write([item]);
+                  } else {
+                    // Fallback: copy full image if no rect
+                    const item = new ClipboardItem({ [blob.type]: blob });
+                    await navigator.clipboard.write([item]);
+                  }
+                  resolve();
+                } catch (err) { reject(err); }
+              });
             });
           });
-        });
-      }, 50);
-    });
-  }
+        }, 500); // Wait 500ms for smooth scroll to settle
+      });
+    }
 
   async function copyToClipboard() {
-    try {
-      // FIX: Ensure document has focus for clipboard API
-      window.focus();
+        try {
+          // FIX: Ensure document has focus for clipboard API
+          window.focus();
 
-      await captureAndCopyScreenshot();
-      showToast();
-    } catch (e) {
-      console.error('Screenshot copy failed', e);
+          await captureAndCopyScreenshot();
+          showToast();
+        } catch (e) {
+          console.error('Screenshot copy failed', e);
 
-      // If it was a permission/screenshot specific error, show that
-      // Otherwise fall back to text
-      const errorMsg = e.message || e.toString();
-      if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
-        const toast = shadowRoot.getElementById('toast');
-        toast.textContent = '❌ Screenshot failed. Please check permissions.';
-        toast.className = 'toast show';
-        setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
-      } else {
-        // Fallback to text if it's just a general failure (or if we still want to give them something)
-        const clipText = `Found on Booking.com for ${_price}`;
-        navigator.clipboard.writeText(clipText);
-        showToast(); // Still show instruction even if image failed, they might have text
-      }
-    }
-  }
-
-  async function draftEmail() {
-    // VALIDATION: Gatekeeper check
-    if (!_roomDetails || _roomDetails.length === 0) {
-      showError();
-      return;
-    }
-
-    await copyToClipboard(); // Wait for screenshot
-    const { subject, body } = getEmailContent();
-    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
-  }
-
-  async function openGmail() {
-    // VALIDATION: Gatekeeper check
-    if (!_roomDetails || _roomDetails.length === 0) {
-      showError();
-      return;
-    }
-
-    await copyToClipboard(); // Wait for screenshot
-    const { subject, body } = getEmailContent();
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.open(gmailUrl, '_blank');
-  }
-
-  // Bind events
-  shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
-  shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
-
-  // FETCH HOTEL DETAILS FROM BACKEND (with SMART CACHE)
-  (async function fetchHotelDetails() {
-    try {
-      const cacheKey = `cache_${_hotelName}`;
-      const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
-      // Helper to render buttons from data
-      const renderButtons = (data) => {
-        const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
-        if (!dynamicContainer) return;
-
-        // Clear existing buttons first
-        dynamicContainer.innerHTML = '';
-
-        // Add Official Website button
-        if (data.website) {
-          const websiteBtn = document.createElement('button');
-          websiteBtn.className = 'btn-outline';
-          websiteBtn.textContent = '🌐 Official Website';
-          websiteBtn.addEventListener('click', () => {
-            window.open(data.website, '_blank');
-          });
-          dynamicContainer.appendChild(websiteBtn);
-        }
-
-        // Add Phone link
-        if (data.phone) {
-          const phoneLink = document.createElement('a');
-          phoneLink.className = 'phone-link';
-          phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
-          phoneLink.textContent = `📞 ${data.phone}`;
-          dynamicContainer.appendChild(phoneLink);
-        }
-      };
-
-      // STEP A: Check Cache
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        const cached = await chrome.storage.local.get(cacheKey);
-
-        if (cached[cacheKey]) {
-          const { data, timestamp } = cached[cacheKey];
-          const age = Date.now() - timestamp;
-
-          // STEP B (HIT): Use cache if < 30 days old
-          if (age < THIRTY_DAYS_MS && data) {
-            console.log('bookDirect: Using cached hotel data (age:', Math.round(age / 86400000), 'days)');
-            renderButtons(data);
-            return; // Done! No API call needed.
+          // If it was a permission/screenshot specific error, show that
+          // Otherwise fall back to text
+          const errorMsg = e.message || e.toString();
+          if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
+            const toast = shadowRoot.getElementById('toast');
+            toast.textContent = '❌ Screenshot failed. Please check permissions.';
+            toast.className = 'toast show';
+            setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
+          } else {
+            // Fallback to text if it's just a general failure (or if we still want to give them something)
+            const clipText = `Found on Booking.com for ${_price}`;
+            navigator.clipboard.writeText(clipText);
+            showToast(); // Still show instruction even if image failed, they might have text
           }
         }
       }
 
-      // STEP C (MISS): Call API
-      console.log('bookDirect: Cache miss, fetching from API...');
-      const apiUrl = `https://hotelfinder.gsindrih.workers.dev/?query=${encodeURIComponent(_hotelName)}`;
-      const response = await fetch(apiUrl);
+  async function draftEmail() {
+        // VALIDATION: Gatekeeper check
+        if (!_roomDetails || _roomDetails.length === 0) {
+          showError();
+          return;
+        }
 
-      if (!response.ok) return; // Fail silently
-
-      const data = await response.json();
-
-      // Save to cache with timestamp
-      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({ [cacheKey]: { data, timestamp: Date.now() } });
-        console.log('bookDirect: Cached hotel data for', _hotelName);
+        await copyToClipboard(); // Wait for screenshot
+        const { subject, body } = getEmailContent();
+        window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
       }
 
-      renderButtons(data);
+  async function openGmail() {
+        // VALIDATION: Gatekeeper check
+        if (!_roomDetails || _roomDetails.length === 0) {
+          showError();
+          return;
+        }
 
-    } catch (e) {
-      // Fail silently - don't show errors to user
-      console.log('bookDirect: Hotel details fetch failed (silent):', e.message);
-    }
-  })();
+        await copyToClipboard(); // Wait for screenshot
+        const { subject, body } = getEmailContent();
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.open(gmailUrl, '_blank');
+      }
 
-  // Expose update methods
-  container.updatePrice = function (newPrice) {
-    _price = newPrice;
-    const priceEl = shadowRoot.querySelector('.value.price');
-    if (priceEl) {
-      priceEl.textContent = newPrice;
+  // Bind events
+  shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
+    shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
 
-      // Small animation to show update
-      priceEl.style.transition = 'color 0.3s';
-      priceEl.style.color = '#e2aa11'; // Flash yellow/gold
-      setTimeout(() => {
-        priceEl.style.color = '#008009'; // Back to green
-      }, 500);
-    }
+    // FETCH HOTEL DETAILS FROM BACKEND (with SMART CACHE)
+    (async function fetchHotelDetails() {
+      try {
+        const cacheKey = `cache_${_hotelName}`;
+        const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+        // Helper to render buttons from data
+        const renderButtons = (data) => {
+          const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
+          if (!dynamicContainer) return;
+
+          // Clear existing buttons first
+          dynamicContainer.innerHTML = '';
+
+          // Add Official Website button
+          if (data.website) {
+            const websiteBtn = document.createElement('button');
+            websiteBtn.className = 'btn-outline';
+            websiteBtn.textContent = '🌐 Official Website';
+            websiteBtn.addEventListener('click', () => {
+              window.open(data.website, '_blank');
+            });
+            dynamicContainer.appendChild(websiteBtn);
+          }
+
+          // Add Phone link
+          if (data.phone) {
+            const phoneLink = document.createElement('a');
+            phoneLink.className = 'phone-link';
+            phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
+            phoneLink.textContent = `📞 ${data.phone}`;
+            dynamicContainer.appendChild(phoneLink);
+          }
+        };
+
+        // STEP A: Check Cache
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          const cached = await chrome.storage.local.get(cacheKey);
+
+          if (cached[cacheKey]) {
+            const { data, timestamp } = cached[cacheKey];
+            const age = Date.now() - timestamp;
+
+            // STEP B (HIT): Use cache if < 30 days old
+            if (age < THIRTY_DAYS_MS && data) {
+              console.log('bookDirect: Using cached hotel data (age:', Math.round(age / 86400000), 'days)');
+              renderButtons(data);
+              return; // Done! No API call needed.
+            }
+          }
+        }
+
+        // STEP C (MISS): Call API
+        console.log('bookDirect: Cache miss, fetching from API...');
+        const apiUrl = `https://hotelfinder.gsindrih.workers.dev/?query=${encodeURIComponent(_hotelName)}`;
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) return; // Fail silently
+
+        const data = await response.json();
+
+        // Save to cache with timestamp
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ [cacheKey]: { data, timestamp: Date.now() } });
+          console.log('bookDirect: Cached hotel data for', _hotelName);
+        }
+
+        renderButtons(data);
+
+      } catch (e) {
+        // Fail silently - don't show errors to user
+        console.log('bookDirect: Hotel details fetch failed (silent):', e.message);
+      }
+    })();
+
+    // Expose update methods
+    container.updatePrice = function (newPrice) {
+      _price = newPrice;
+      const priceEl = shadowRoot.querySelector('.value.price');
+      if (priceEl) {
+        priceEl.textContent = newPrice;
+
+        // Small animation to show update
+        priceEl.style.transition = 'color 0.3s';
+        priceEl.style.color = '#e2aa11'; // Flash yellow/gold
+        setTimeout(() => {
+          priceEl.style.color = '#008009'; // Back to green
+        }, 500);
+      }
+    };
+
+    container.updateDetails = function (details) {
+      _roomDetails = details;
+    };
+
+    return container;
   };
-
-  container.updateDetails = function (details) {
-    _roomDetails = details;
-  };
-
-  return container;
-};
