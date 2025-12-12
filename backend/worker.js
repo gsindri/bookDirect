@@ -71,10 +71,81 @@ export default {
 
             const detailsData = await detailsResponse.json();
 
+            // Step 3: SNIPER SCRAPE - Extract email from hotel website
+            let foundEmail = null;
+
+            if (detailsData.websiteUri) {
+                try {
+                    // Fetch the hotel's homepage
+                    const websiteResponse = await fetch(detailsData.websiteUri, {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (compatible; HotelFinder/1.0)',
+                        },
+                        // Don't follow too many redirects, timeout after 5s
+                        redirect: 'follow',
+                    });
+
+                    if (websiteResponse.ok) {
+                        const html = await websiteResponse.text();
+
+                        // Priority 1: Look for mailto: links
+                        const mailtoMatch = html.match(/mailto:([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})/i);
+
+                        // Priority 2: Look for email patterns in text
+                        const emailPattern = /[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}/gi;
+                        const allEmails = html.match(emailPattern) || [];
+
+                        // Junk email filter - ignore these patterns
+                        const junkPatterns = [
+                            /^sentry@/i,
+                            /^noreply@/i,
+                            /^no-reply@/i,
+                            /^wix@/i,
+                            /^support@wix/i,
+                            /^admin@/i,
+                            /^webmaster@/i,
+                            /example\.com$/i,
+                            /sentry\.io$/i,
+                            /wix\.com$/i,
+                            /schema\.org$/i,
+                        ];
+
+                        const isJunk = (email) => junkPatterns.some(pattern => pattern.test(email));
+
+                        // Priority 1: Use mailto if valid
+                        if (mailtoMatch && mailtoMatch[1] && !isJunk(mailtoMatch[1])) {
+                            foundEmail = mailtoMatch[1].toLowerCase();
+                        } else {
+                            // Priority 2: Find first valid email from all matches
+                            // Prefer emails with "reserv", "book", "info", "contact" in them
+                            const priorityKeywords = ['reserv', 'book', 'info', 'contact', 'front', 'recep'];
+                            const validEmails = allEmails.filter(e => !isJunk(e));
+
+                            // Sort by priority keywords
+                            const prioritized = validEmails.sort((a, b) => {
+                                const aHasPriority = priorityKeywords.some(k => a.toLowerCase().includes(k));
+                                const bHasPriority = priorityKeywords.some(k => b.toLowerCase().includes(k));
+                                if (aHasPriority && !bHasPriority) return -1;
+                                if (!aHasPriority && bHasPriority) return 1;
+                                return 0;
+                            });
+
+                            if (prioritized.length > 0) {
+                                foundEmail = prioritized[0].toLowerCase();
+                            }
+                        }
+                    }
+                } catch (scrapeError) {
+                    // Silently ignore scrape failures - website might be down or blocking
+                    console.log('Email scrape failed:', scrapeError.message);
+                }
+            }
+
             // Return the result
             const result = {
                 website: detailsData.websiteUri || null,
                 phone: detailsData.internationalPhoneNumber || null,
+                found_email: foundEmail,
             };
 
             return new Response(JSON.stringify(result), {
