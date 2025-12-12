@@ -695,62 +695,62 @@ Best regards,`;
           });
         }, 500); // Wait 500ms for smooth scroll to settle
       }, 50); // Initial delay before scroll
+    });
+
+    async function copyToClipboard() {
+      try {
+        // FIX: Ensure document has focus for clipboard API
+        window.focus();
+
+        await captureAndCopyScreenshot();
+        showToast();
+      } catch (e) {
+        console.error('Screenshot copy failed', e);
+
+        // If it was a permission/screenshot specific error, show that
+        // Otherwise fall back to text
+        const errorMsg = e.message || e.toString();
+        if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
+          const toast = shadowRoot.getElementById('toast');
+          toast.textContent = '❌ Screenshot failed. Please check permissions.';
+          toast.className = 'toast show';
+          setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
+        } else {
+          // Fallback to text if it's just a general failure (or if we still want to give them something)
+          const clipText = `Found on Booking.com for ${_price}`;
+          navigator.clipboard.writeText(clipText);
+          showToast(); // Still show instruction even if image failed, they might have text
+        }
+      }
     }
 
-  async function copyToClipboard() {
-        try {
-          // FIX: Ensure document has focus for clipboard API
-          window.focus();
-
-          await captureAndCopyScreenshot();
-          showToast();
-        } catch (e) {
-          console.error('Screenshot copy failed', e);
-
-          // If it was a permission/screenshot specific error, show that
-          // Otherwise fall back to text
-          const errorMsg = e.message || e.toString();
-          if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
-            const toast = shadowRoot.getElementById('toast');
-            toast.textContent = '❌ Screenshot failed. Please check permissions.';
-            toast.className = 'toast show';
-            setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
-          } else {
-            // Fallback to text if it's just a general failure (or if we still want to give them something)
-            const clipText = `Found on Booking.com for ${_price}`;
-            navigator.clipboard.writeText(clipText);
-            showToast(); // Still show instruction even if image failed, they might have text
-          }
-        }
+    async function draftEmail() {
+      // VALIDATION: Gatekeeper check
+      if (!_roomDetails || _roomDetails.length === 0) {
+        showError();
+        return;
       }
 
-  async function draftEmail() {
-        // VALIDATION: Gatekeeper check
-        if (!_roomDetails || _roomDetails.length === 0) {
-          showError();
-          return;
-        }
+      await copyToClipboard(); // Wait for screenshot
+      const { subject, body } = getEmailContent();
+      window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+    }
 
-        await copyToClipboard(); // Wait for screenshot
-        const { subject, body } = getEmailContent();
-        window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+    async function openGmail() {
+      // VALIDATION: Gatekeeper check
+      if (!_roomDetails || _roomDetails.length === 0) {
+        showError();
+        return;
       }
 
-  async function openGmail() {
-        // VALIDATION: Gatekeeper check
-        if (!_roomDetails || _roomDetails.length === 0) {
-          showError();
-          return;
-        }
+      await copyToClipboard(); // Wait for screenshot
+      const { subject, body } = getEmailContent();
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.open(gmailUrl, '_blank');
+    }
 
-        await copyToClipboard(); // Wait for screenshot
-        const { subject, body } = getEmailContent();
-        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        window.open(gmailUrl, '_blank');
-      }
-
-  // Bind events
-  shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
+    // Bind events
+    shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
     shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
 
     // FETCH HOTEL DETAILS FROM BACKEND (with SMART CACHE)
