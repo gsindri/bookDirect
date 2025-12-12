@@ -74,10 +74,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       }
       
       .logo-icon {
-        width: 16px;
-        height: 16px;
-        background: #003580;
-        border-radius: 3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        object-fit: contain;
+      }
         display: inline-block;
       }
 
@@ -258,7 +259,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         <div class="container">
             <div class="header">
             <div class="logo">
-                <span class="logo-icon"></span>
+                <img class="logo-icon" src="${typeof chrome !== 'undefined' && chrome.runtime ? chrome.runtime.getURL('icons/bookDirect_icon1.png') : ''}" alt="">
                 bookDirect
             </div>
             </div>
