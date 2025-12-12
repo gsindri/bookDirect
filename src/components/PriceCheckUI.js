@@ -267,7 +267,18 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     return { subject, body };
   }
 
-  // ... (truncate remains)
+  function showToast() {
+    const toast = shadowRoot.getElementById('toast');
+    toast.textContent = '📸 Proof Copied! Press Ctrl+V to paste the screenshot in your email.';
+    toast.className = 'toast show';
+    // Persistent: stays for 8 seconds to ensure they see the instruction
+    setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 8000);
+  }
+
+  // HELPER FUNCTIONS (Internal)
+  function truncate(str, n) {
+    return (str.length > n) ? str.substr(0, n - 1) + '&hellip;' : str;
+  }
 
   function captureAndCopyScreenshot() {
     // ... (mock mode logic same)
