@@ -241,10 +241,12 @@
             return;
         }
 
-        if (handleSearchPage()) {
-            window.hasBookDirectInjected = true;
-            return;
-        }
+        // NOTE: Search page handler disabled - the negotiation UI only makes sense
+        // when viewing a specific hotel, not when browsing search results.
+        // if (handleSearchPage()) {
+        //     window.hasBookDirectInjected = true;
+        //     return;
+        // }
     }
 
     const interval = setInterval(() => {
