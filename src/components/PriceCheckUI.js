@@ -138,6 +138,45 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       .secondary-link:hover {
         color: #003580;
       }
+
+      /* Outline-style button for Official Website */
+      .btn-outline {
+        background: transparent;
+        color: #008009;
+        border: 2px solid #008009;
+        padding: 8px;
+        border-radius: 6px;
+        font-weight: 600;
+        cursor: pointer;
+        width: 100%;
+        margin-top: 8px;
+        transition: background 0.2s, color 0.2s;
+        font-size: 13px;
+      }
+
+      .btn-outline:hover {
+        background: #008009;
+        color: white;
+      }
+
+      /* Phone link styling */
+      .phone-link {
+        display: block;
+        text-align: center;
+        margin-top: 8px;
+        font-size: 12px;
+        color: #003580;
+        text-decoration: none;
+      }
+
+      .phone-link:hover {
+        text-decoration: underline;
+      }
+
+      /* Container for dynamic buttons */
+      .dynamic-buttons {
+        margin-top: 8px;
+      }
       
       .toast {
         visibility: hidden;
@@ -243,6 +282,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
             <button id="draft-email">Draft Negotiation Email</button>
             <div id="open-gmail" class="secondary-link">Open in Gmail</div>
+            <div id="dynamic-buttons" class="dynamic-buttons"></div>
             <div id="toast" class="toast">Screenshot copied! Psssaste it in your email.</div>
             </div>
         </div>
@@ -704,6 +744,45 @@ Best regards,`;
   // Bind events
   shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
   shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
+
+  // FETCH HOTEL DETAILS FROM BACKEND (async, non-blocking)
+  (async function fetchHotelDetails() {
+    try {
+      const apiUrl = `https://hotelfinder.gsindrih.workers.dev/?query=${encodeURIComponent(_hotelName)}`;
+      const response = await fetch(apiUrl);
+
+      if (!response.ok) return; // Fail silently
+
+      const data = await response.json();
+      const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
+
+      if (!dynamicContainer) return;
+
+      // Add Official Website button
+      if (data.website) {
+        const websiteBtn = document.createElement('button');
+        websiteBtn.className = 'btn-outline';
+        websiteBtn.textContent = '🌐 Official Website';
+        websiteBtn.addEventListener('click', () => {
+          window.open(data.website, '_blank');
+        });
+        dynamicContainer.appendChild(websiteBtn);
+      }
+
+      // Add Phone link
+      if (data.phone) {
+        const phoneLink = document.createElement('a');
+        phoneLink.className = 'phone-link';
+        phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
+        phoneLink.textContent = `📞 ${data.phone}`;
+        dynamicContainer.appendChild(phoneLink);
+      }
+
+    } catch (e) {
+      // Fail silently - don't show errors to user
+      console.log('bookDirect: Hotel details fetch failed (silent):', e.message);
+    }
+  })();
 
   // Expose update methods
   container.updatePrice = function (newPrice) {
