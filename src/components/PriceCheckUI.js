@@ -162,6 +162,56 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         opacity: 1;
         bottom: 50px;
       }
+      
+      .error-tooltip {
+        visibility: hidden;
+        background-color: #ffebeb;
+        color: #d4111e;
+        border: 1px solid #d4111e;
+        text-align: left;
+        border-radius: 4px;
+        padding: 12px;
+        position: absolute;
+        z-index: 10000;
+        bottom: 70px; /* Above the button */
+        left: 16px;
+        right: 16px;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        opacity: 0;
+        transition: opacity 0.2s, transform 0.2s;
+        transform: translateY(10px);
+      }
+      
+      .error-tooltip.show {
+        visibility: visible;
+        opacity: 1;
+        transform: translateY(0);
+      }
+      
+      /* Arrow for tooltip */
+      .error-tooltip::after {
+        content: "";
+        position: absolute;
+        bottom: -6px;
+        left: 50%;
+        margin-left: -6px;
+        border-width: 6px 6px 0;
+        border-style: solid;
+        border-color: #d4111e transparent transparent transparent;
+      }
+      .error-tooltip::before {
+        content: "";
+        position: absolute;
+        bottom: -4px;
+        left: 50%;
+        margin-left: -6px;
+        border-width: 6px 6px 0;
+        border-style: solid;
+        border-color: #ffebeb transparent transparent transparent;
+        z-index: 1;
+      }
     `;
 
   const html = `
@@ -182,9 +232,18 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
                 <span class="label">Current Price:</span>
                 <span class="value price">${_price}</span>
             </div>
+            
+            <!-- Error Tooltip -->
+            <div id="error-tooltip" class="error-tooltip">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">⚠️</span>
+                    <span>Please select rooms in the table first.</span>
+                </div>
+            </div>
+
             <button id="draft-email">Draft Negotiation Email</button>
             <div id="open-gmail" class="secondary-link">Open in Gmail</div>
-            <div id="toast" class="toast">Screenshot copied! Paste it in your email.</div>
+            <div id="toast" class="toast">Screenshot copied! Psssaste it in your email.</div>
             </div>
         </div>
       </div>
@@ -255,14 +314,6 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     body = body.replace('commission user fees', 'platform commission fees'); // Fallback replacement if template differs
     body = body.replace('commission fees', 'platform commission fees'); // Ensure it hits
 
-    // Ensure templates generate the right base text first? 
-    // Actually, let's just patch the templates source directly or replace here.
-    // The user asked to "Find the phrase... and change it". 
-    // Let's modify the templates directly below is better, but since I'm editing here, I'll do a replace.
-    // Wait, the templates are defined above. I should edit the templates definition OR do a replace here.
-    // I will do a replace here for safety as I'm in this block.
-    // The current templates say "commission user fees" (Value template).
-
     console.log(`bookDirect: Selected template '${template.type}'`);
     return { subject, body };
   }
@@ -273,6 +324,19 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     toast.className = 'toast show';
     // Persistent: stays for 8 seconds to ensure they see the instruction
     setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 8000);
+  }
+
+  function showError() {
+    const errorEl = shadowRoot.getElementById('error-tooltip');
+    errorEl.className = 'error-tooltip show';
+    // Shake animation
+    const containerEl = shadowRoot.querySelector('.container');
+    containerEl.style.transform = 'translateX(5px)';
+    setTimeout(() => { containerEl.style.transform = 'translateX(-5px)'; }, 50);
+    setTimeout(() => { containerEl.style.transform = 'translateX(5px)'; }, 100);
+    setTimeout(() => { containerEl.style.transform = 'translateX(0)'; }, 150);
+
+    setTimeout(() => { errorEl.className = 'error-tooltip'; }, 4000); // Hide after 4s
   }
 
   // HELPER FUNCTIONS (Internal)
@@ -317,6 +381,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         const reserveBtn = document.querySelector('.js-reservation-button') ||
           document.querySelector('button[type="submit"].hprt-reservation-cta__book');
         let sidebarEl = null;
+
         if (reserveBtn) {
           sidebarEl = reserveBtn.closest('.hprt-block') ||
             reserveBtn.closest('aside') ||
@@ -425,7 +490,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   async function draftEmail() {
     // VALIDATION: Gatekeeper check
     if (!_roomDetails || _roomDetails.length === 0) {
-      alert("Please select at least one room in the table to generate a negotiation email.");
+      showError();
       return;
     }
 
@@ -437,7 +502,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   async function openGmail() {
     // VALIDATION: Gatekeeper check
     if (!_roomDetails || _roomDetails.length === 0) {
-      alert("Please select at least one room in the table to generate a negotiation email.");
+      showError();
       return;
     }
 
