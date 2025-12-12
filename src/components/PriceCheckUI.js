@@ -423,12 +423,24 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   }
 
   async function draftEmail() {
+    // VALIDATION: Gatekeeper check
+    if (!_roomDetails || _roomDetails.length === 0) {
+      alert("Please select at least one room in the table to generate a negotiation email.");
+      return;
+    }
+
     await copyToClipboard(); // Wait for screenshot
     const { subject, body } = getEmailContent();
     window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
   }
 
   async function openGmail() {
+    // VALIDATION: Gatekeeper check
+    if (!_roomDetails || _roomDetails.length === 0) {
+      alert("Please select at least one room in the table to generate a negotiation email.");
+      return;
+    }
+
     await copyToClipboard(); // Wait for screenshot
     const { subject, body } = getEmailContent();
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
