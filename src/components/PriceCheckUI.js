@@ -332,124 +332,115 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
         // STEP C: Capture
         chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
-          // ... cleanup ...
-          container.style.display = '';
+          // STEP D: Cleanup immediately (Restore UI & Remove Injection)
+          container.style.display = ''; // Restore visibility
           if (injectedDiv) injectedDiv.remove();
 
-          // ... handle response ...
+          if (chrome.runtime.lastError || !response || !response.success) {
+            reject(chrome.runtime.lastError || response?.error);
+            return;
+          }
 
+          try {
+            const res = await fetch(response.dataUrl);
+            const blob = await res.blob();
+            const imageBitmap = await createImageBitmap(blob);
 
-          // STEP C: Capture
-          chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
-            // STEP D: Cleanup immediately (Restore UI & Remove Injection)
-            container.style.display = ''; // Restore visibility
-            if (injectedDiv) injectedDiv.remove();
+            // Canvas for cropping
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
 
-            if (chrome.runtime.lastError || !response || !response.success) {
-              reject(chrome.runtime.lastError || response?.error);
-              return;
+            // Handle DPR
+            const dpr = window.devicePixelRatio || 1;
+
+            // If we successfully identified a sidebar area to crop
+            if (rect && rect.width > 0 && rect.height > 0) {
+              canvas.width = rect.width * dpr;
+              canvas.height = rect.height * dpr;
+
+              ctx.drawImage(imageBitmap,
+                rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
+                0, 0, canvas.width, canvas.height // Dest
+              );
+
+              const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+              const item = new ClipboardItem({ 'image/png': croppedBlob });
+              await navigator.clipboard.write([item]);
+            } else {
+              // Fallback: copy full image if no rect
+              const item = new ClipboardItem({ [blob.type]: blob });
+              await navigator.clipboard.write([item]);
             }
-
-            try {
-              const res = await fetch(response.dataUrl);
-              const blob = await res.blob();
-              const imageBitmap = await createImageBitmap(blob);
-
-              // Canvas for cropping
-              const canvas = document.createElement('canvas');
-              const ctx = canvas.getContext('2d');
-
-              // Handle DPR
-              const dpr = window.devicePixelRatio || 1;
-
-              // If we successfully identified a sidebar area to crop
-              if (rect && rect.width > 0 && rect.height > 0) {
-                canvas.width = rect.width * dpr;
-                canvas.height = rect.height * dpr;
-
-                ctx.drawImage(imageBitmap,
-                  rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
-                  0, 0, canvas.width, canvas.height // Dest
-                );
-
-                const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-                const item = new ClipboardItem({ 'image/png': croppedBlob });
-                await navigator.clipboard.write([item]);
-              } else {
-                // Fallback: copy full image if no rect
-                const item = new ClipboardItem({ [blob.type]: blob });
-                await navigator.clipboard.write([item]);
-              }
-
-            } catch (err) { reject(err); }
-          });
-        }, 50);
-      });
-    }
+            resolve();
+          } catch (err) { reject(err); }
+        });
+      }, 50);
+    });
+  }
 
   async function copyToClipboard() {
-        try {
-          // FIX: Ensure document has focus for clipboard API
-          window.focus();
+    try {
+      // FIX: Ensure document has focus for clipboard API
+      window.focus();
 
-          await captureAndCopyScreenshot();
-          showToast();
-        } catch (e) {
-          console.error('Screenshot copy failed', e);
+      await captureAndCopyScreenshot();
+      showToast();
+    } catch (e) {
+      console.error('Screenshot copy failed', e);
 
-          // If it was a permission/screenshot specific error, show that
-          // Otherwise fall back to text
-          const errorMsg = e.message || e.toString();
-          if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
-            const toast = shadowRoot.getElementById('toast');
-            toast.textContent = '❌ Screenshot failed. Please check permissions.';
-            toast.className = 'toast show';
-            setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
-          } else {
-            // Fallback to text if it's just a general failure (or if we still want to give them something)
-            const clipText = `Found on Booking.com for ${_price}`;
-            navigator.clipboard.writeText(clipText);
-            showToast(); // Still show instruction even if image failed, they might have text
-          }
-        }
+      // If it was a permission/screenshot specific error, show that
+      // Otherwise fall back to text
+      const errorMsg = e.message || e.toString();
+      if (errorMsg.includes('permission') || errorMsg.includes('Capture')) {
+        const toast = shadowRoot.getElementById('toast');
+        toast.textContent = '❌ Screenshot failed. Please check permissions.';
+        toast.className = 'toast show';
+        setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 4000);
+      } else {
+        // Fallback to text if it's just a general failure (or if we still want to give them something)
+        const clipText = `Found on Booking.com for ${_price}`;
+        navigator.clipboard.writeText(clipText);
+        showToast(); // Still show instruction even if image failed, they might have text
       }
+    }
+  }
 
   async function draftEmail() {
-        await copyToClipboard(); // Wait for screenshot
-        const { subject, body } = getEmailContent();
-        window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
-      }
+    await copyToClipboard(); // Wait for screenshot
+    const { subject, body } = getEmailContent();
+    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+  }
 
   async function openGmail() {
-        await copyToClipboard(); // Wait for screenshot
-        const { subject, body } = getEmailContent();
-        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        window.open(gmailUrl, '_blank');
-      }
+    await copyToClipboard(); // Wait for screenshot
+    const { subject, body } = getEmailContent();
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(gmailUrl, '_blank');
+  }
 
   // Bind events
   shadowRoot.getElementById('draft-email').addEventListener('click', draftEmail);
-    shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
+  shadowRoot.getElementById('open-gmail').addEventListener('click', openGmail);
 
-    // Expose update methods
-    container.updatePrice = function (newPrice) {
-      _price = newPrice;
-      const priceEl = shadowRoot.querySelector('.value.price');
-      if (priceEl) {
-        priceEl.textContent = newPrice;
+  // Expose update methods
+  container.updatePrice = function (newPrice) {
+    _price = newPrice;
+    const priceEl = shadowRoot.querySelector('.value.price');
+    if (priceEl) {
+      priceEl.textContent = newPrice;
 
-        // Small animation to show update
-        priceEl.style.transition = 'color 0.3s';
-        priceEl.style.color = '#e2aa11'; // Flash yellow/gold
-        setTimeout(() => {
-          priceEl.style.color = '#008009'; // Back to green
-        }, 500);
-      }
-    };
-
-    container.updateDetails = function (details) {
-      _roomDetails = details;
-    };
-
-    return container;
+      // Small animation to show update
+      priceEl.style.transition = 'color 0.3s';
+      priceEl.style.color = '#e2aa11'; // Flash yellow/gold
+      setTimeout(() => {
+        priceEl.style.color = '#008009'; // Back to green
+      }, 500);
+    }
   };
+
+  container.updateDetails = function (details) {
+    _roomDetails = details;
+  };
+
+  return container;
+};
