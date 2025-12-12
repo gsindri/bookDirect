@@ -694,7 +694,7 @@ Best regards,`;
             });
           });
         }, 500); // Wait 500ms for smooth scroll to settle
-      });
+      }, 50); // Initial delay before scroll
     }
 
   async function copyToClipboard() {
