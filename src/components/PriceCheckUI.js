@@ -79,8 +79,6 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         border-radius: 4px;
         object-fit: contain;
       }
-        display: inline-block;
-      }
 
       .content {
         display: flex;
