@@ -251,21 +251,48 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
   shadowRoot.innerHTML = `<style>${baseStyle}${commonStyle}</style>${html}`;
 
-  // TEMPLATES
-  const emailTemplates = [
-    {
-      type: 'The Direct',
-      body: (details, price) => `Hi,\n\nI want to book a stay at your hotel:\n\n${details || '(See details in attachment)'}\n\nI see a total of ${price} on Booking.com. I prefer to book directly. Can you match or beat this price?\n\nThanks,`
-    },
-    {
-      type: 'The Friendly',
-      body: (details, price) => `Hi there,\n\nI'm planning a trip and would love to stay at your place! I'm looking at:\n\n${details || '(See details in attachment)'}\n\nI found a rate of ${price} on Booking.com, but I always prefer to support hotels directly. Is there any way you could offer a better deal if I book with you?\n\nBest regards,`
-    },
-    {
-      type: 'The Value',
-      body: (details, price) => `Hello,\n\nI'm looking to make a reservation for:\n\n${details || '(See details in attachment)'}\n\nThe visible price on Booking.com is ${price}. Since booking directly saves you the commission user fees, could you pass some of those savings on to me with a better rate?\n\nThank you,`
-    }
-  ];
+  // HELPER: Scrape and parse dates with "Smart Year" logic
+  function getScrapedDates() {
+    const dateEl = document.querySelector('[data-testid="searchbox-dates-container"]') ||
+      document.querySelector('.sb-date-field__display');
+
+    if (!dateEl) return { checkIn: 'Date', checkOut: 'Date', raw: '' };
+
+    const raw = dateEl.innerText.replace(/\n/g, ' ');
+    // Handle "Fri, Dec 12 — Sun, Dec 14"
+    let parts = raw.split(/—|-/); // Em-dash or hyphen
+    if (parts.length < 2) parts = [raw, ''];
+
+    const cleanDate = (str) => {
+      str = str.trim();
+      // Check if year exists (4 digits)
+      if (/\d{4}/.test(str)) return str;
+
+      // Smart Year Logic
+      // Parse the month from the string (e.g. "Fri, Dec 12")
+      const monthMatch = str.match(/[A-Z][a-z]{2}/); // Matches "Dec", "Jan"
+      if (monthMatch) {
+        const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+        const targetMonth = months[monthMatch[0]];
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        // Logic: If target month is significantly earlier than current, assume next year.
+        if (targetMonth !== undefined) {
+          const year = (targetMonth < currentMonth) ? currentYear + 1 : currentYear;
+          return `${str}, ${year}`;
+        }
+      }
+      return str; // Fallback
+    };
+
+    return {
+      checkIn: cleanDate(parts[0]),
+      checkOut: cleanDate(parts[1]),
+      raw: raw
+    };
+  }
 
   // HELPER Functions
   function createDateGrid(checkIn, checkOut) {
