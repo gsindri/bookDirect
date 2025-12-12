@@ -295,9 +295,21 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   }
 
   // HELPER Functions
-  function createDateGrid(checkIn, checkOut) {
+  function createDateGrid(checkIn, checkOut, hotelName) {
     const grid = document.createElement('div');
     grid.style.cssText = 'background:#fff; border:1px solid #e7e7e7; border-radius:8px; padding:12px; margin-bottom:12px; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; box-shadow:0 1px 2px rgba(0,0,0,0.05);';
+
+    // HOTEL NAME (At the top for trust)
+    if (hotelName) {
+      const hotelHeader = document.createElement('div');
+      hotelHeader.innerText = hotelName;
+      hotelHeader.style.cssText = 'font-weight:700; color:#003b95; font-size:18px; margin-bottom:8px; text-align:left;';
+      grid.appendChild(hotelHeader);
+
+      const divider = document.createElement('div');
+      divider.style.cssText = 'border-bottom:1px solid #e7e7e7; margin-bottom:12px;';
+      grid.appendChild(divider);
+    }
 
     const title = document.createElement('div');
     title.innerText = 'Your booking details';
@@ -360,7 +372,9 @@ ${_roomDetails || '1x Room (See details in attachment)'}
 
 The current rate on Booking.com is ${_price}.
 
-Since a direct booking saves the platform fee, could you match this price (or offer a better rate)?
+Since booking directly saves you the platform commission (approx. 15-20%), would you be open to offering a 10% discount on this rate? This way, we both save money compared to the Booking.com price.
+
+Alternatively, if you cannot lower the rate, would you include free breakfast or a room upgrade if I book directly at the matched price?
 
 Please see the attached screenshot of the current online offer.
 
@@ -575,7 +589,7 @@ Best regards,`;
 
         if (sidebarEl) {
           // STEP B: Inject Visual Grid
-          injectedDiv = createDateGrid(checkIn, checkOut);
+          injectedDiv = createDateGrid(checkIn, checkOut, _hotelName);
           sidebarEl.prepend(injectedDiv);
 
           // Measure
