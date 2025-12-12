@@ -327,6 +327,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   }
 
   function showError() {
+    // Try to highlight the actual table first
+    const highlighted = highlightTableAndShowBubble();
+    if (highlighted) return; // If we found the table, don't show the button tooltip
+
+    // Fallback: Show tooltip on the button itself
     const errorEl = shadowRoot.getElementById('error-tooltip');
     errorEl.className = 'error-tooltip show';
     // Shake animation
@@ -337,6 +342,105 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     setTimeout(() => { containerEl.style.transform = 'translateX(0)'; }, 150);
 
     setTimeout(() => { errorEl.className = 'error-tooltip'; }, 4000); // Hide after 4s
+  }
+
+  function highlightTableAndShowBubble() {
+    // Find the dropdowns in the REAL DOM
+    const selects = document.querySelectorAll('.hprt-nos-select, .hprt-table select');
+    if (!selects.length) return false;
+
+    // 1. Scroll to table
+    const firstSelect = selects[0];
+    firstSelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // 2. Highlight all selects
+    selects.forEach(sel => {
+      sel.style.transition = 'all 0.2s';
+      sel.style.border = '2px solid #d4111e';
+      sel.style.backgroundColor = '#ffebeb';
+      sel.style.boxShadow = '0 0 0 2px #ffebeb'; // Extra glow
+
+      // Remove after a few seconds
+      setTimeout(() => {
+        sel.style.border = '';
+        sel.style.backgroundColor = '';
+        sel.style.boxShadow = '';
+      }, 4000);
+    });
+
+    // 3. Show Bubble (Native Booking style)
+    // Create a temporary div in the body (outside shadow root)
+    const bubble = document.createElement('div');
+    bubble.style.cssText = `
+        position: absolute;
+        background: #ffebeb;
+        color: #d4111e;
+        border: 1px solid #d4111e;
+        padding: 12px;
+        border-radius: 4px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        z-index: 2147483647;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.3s;
+        min-width: 180px;
+    `;
+    bubble.innerHTML = '<span>Select one or more options you want to book</span>';
+
+    // Arrow (Pointing Left)
+    const arrow = document.createElement('div');
+    arrow.style.cssText = `
+        position: absolute;
+        width: 0; 
+        height: 0; 
+        border-top: 6px solid transparent;
+        border-bottom: 6px solid transparent; 
+        border-right: 6px solid #d4111e;
+        left: -6px; 
+        top: 50%;
+        transform: translateY(-50%);
+    `;
+    // Inner arrow to make it look hollow/filled correctly? Simple solid arrow matches the flat design enough.
+    const arrowInner = document.createElement('div');
+    arrowInner.style.cssText = `
+        position: absolute;
+        width: 0; 
+        height: 0; 
+        border-top: 5px solid transparent;
+        border-bottom: 5px solid transparent; 
+        border-right: 5px solid #ffebeb;
+        left: -4px; 
+        top: 50%;
+        transform: translateY(-50%);
+    `;
+
+    bubble.appendChild(arrow);
+    bubble.appendChild(arrowInner);
+    document.body.appendChild(bubble);
+
+    // Position it
+    const rect = firstSelect.getBoundingClientRect();
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+    // Position: To the RIGHT of the select, vertically centered
+    // rect.right + spacing
+    bubble.style.top = (rect.top + scrollTop + (rect.height / 2) - 20) + 'px'; // Center roughly
+    bubble.style.left = (rect.right + scrollLeft + 12) + 'px';
+
+    // Show
+    requestAnimationFrame(() => { bubble.style.opacity = '1'; });
+
+    // Remove
+    setTimeout(() => {
+      bubble.style.opacity = '0';
+      setTimeout(() => bubble.remove(), 300);
+    }, 4000);
+
+    return true; // Captured
   }
 
   // HELPER FUNCTIONS (Internal)
