@@ -9,6 +9,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   let _hotelName = hotelName;
   let _price = price;
   let _roomDetails = '';
+  let _foundEmail = ''; // Discovered email from hotel website
 
   // Get icon URL (needs to be computed before template)
   const iconUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
@@ -734,7 +735,8 @@ Best regards,`;
 
     await copyToClipboard(); // Wait for screenshot
     const { subject, body } = getEmailContent();
-    window.open(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+    const recipient = _foundEmail || '';
+    window.open(`mailto:${recipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
   }
 
   async function openGmail() {
@@ -746,7 +748,8 @@ Best regards,`;
 
     await copyToClipboard(); // Wait for screenshot
     const { subject, body } = getEmailContent();
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const recipient = _foundEmail ? encodeURIComponent(_foundEmail) : '';
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${recipient}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.open(gmailUrl, '_blank');
   }
 
@@ -786,6 +789,12 @@ Best regards,`;
           phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
           phoneLink.textContent = `📞 ${data.phone}`;
           dynamicContainer.appendChild(phoneLink);
+        }
+
+        // Store found_email for draft email
+        if (data.found_email) {
+          _foundEmail = data.found_email;
+          console.log('bookDirect: Found email:', _foundEmail);
         }
       };
 
