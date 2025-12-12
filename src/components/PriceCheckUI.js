@@ -349,23 +349,28 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     const selects = document.querySelectorAll('.hprt-nos-select, .hprt-table select');
     if (!selects.length) return false;
 
-    // 1. Scroll to table
+    // 1. Scroll to table (gentler)
     const firstSelect = selects[0];
-    firstSelect.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    firstSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-    // 2. Highlight all selects
+    // 2. Highlight the CELL/COLUMN (parent td)
     selects.forEach(sel => {
-      sel.style.transition = 'all 0.2s';
-      sel.style.border = '2px solid #d4111e';
-      sel.style.backgroundColor = '#ffebeb';
-      sel.style.boxShadow = '0 0 0 2px #ffebeb'; // Extra glow
+      // Traverse to the table cell (td)
+      const cell = sel.closest('td') || sel.parentNode;
 
-      // Remove after a few seconds
-      setTimeout(() => {
-        sel.style.border = '';
-        sel.style.backgroundColor = '';
-        sel.style.boxShadow = '';
-      }, 4000);
+      if (cell) {
+        cell.style.transition = 'background-color 0.2s';
+        cell.style.backgroundColor = '#ffebeb'; // The pinkish row highlight
+
+        // Also style the select itself slightly to match
+        sel.style.border = '1px solid #d4111e';
+
+        // Remove after a few seconds
+        setTimeout(() => {
+          cell.style.backgroundColor = '';
+          sel.style.border = '';
+        }, 4000);
+      }
     });
 
     // 3. Show Bubble (Native Booking style)
