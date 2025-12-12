@@ -325,39 +325,47 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   }
 
   function getEmailContent() {
-    // Attempt to parse dates for subject
-    let dateStr = '';
-    const dateEl = document.querySelector('[data-testid="searchbox-dates-container"]') ||
-      document.querySelector('.sb-date-field__display');
-    if (dateEl) {
-      // "Fri, Dec 12 — Sun, Dec 14" -> "Fri, Dec 12 - Sun, Dec 14"
-      dateStr = dateEl.innerText.replace(/\n/g, ' ').replace('—', '-');
-    }
+    const dates = getScrapedDates();
 
     // Subject: Direct Booking Inquiry: Dec 12 - Dec 14
     const cleanSubjectDate = (str) => {
-      const parts = str.split(','); // "Fri, Dec 12, 2025" -> "Dec 12"
+      const parts = str.split(',');
       if (parts.length >= 2) return parts[1].trim();
       return str;
     };
 
     // Fallback if scraping failed
-    const dates = getScrapedDates();
     const d1 = cleanSubjectDate(dates.checkIn);
     const d2 = cleanSubjectDate(dates.checkOut);
     const subjectDatePart = (d1 && d2 && d1 !== 'Date') ? `${d1} - ${d2}` : 'Rate Inquiry';
 
     const subject = `Direct Booking Inquiry: ${subjectDatePart}`;
 
-    // OLD TEMPLATE LINE REPLACED
-    const template = { body: () => '' }; // Placeholder so execution continues if I miss the rest
-    // const template = emailTemplates[Math.floor(Math.random() * emailTemplates.length)];
-    // Customize the body text to be more professional
-    let body = template.body(_roomDetails, _price);
-    body = body.replace('commission user fees', 'platform commission fees'); // Fallback replacement if template differs
-    body = body.replace('commission fees', 'platform commission fees'); // Ensure it hits
+    // Clean Hotel Name
+    let cleanHotelName = _hotelName.replace(/Hotel\s+Hotel/i, 'Hotel').trim();
 
-    console.log(`bookDirect: Selected template '${template.type}'`);
+    // BODY - THE GOLDEN SCRIPT
+    const body = `Hello ${cleanHotelName} Reservations Team,
+
+I found your property on Booking.com and it looks perfect for my upcoming trip.
+
+I generally prefer to book directly with the hotel rather than using third-party sites, as I know this helps you save on commission fees.
+
+My Trip Details:
+Check-in: ${dates.checkIn}
+Check-out: ${dates.checkOut}
+
+The Request: I am looking to book:
+${_roomDetails || '1x Room (See details in attachment)'}
+
+The current rate on Booking.com is ${_price}.
+
+Since a direct booking saves the platform fee, could you match this price (or offer a better rate)?
+
+Please see the attached screenshot of the current online offer.
+
+Best regards,`;
+
     return { subject, body };
   }
 
