@@ -50,8 +50,15 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     `;
 
   const commonStyle = `
+      /* 1. Base Container: Modern & Clean */
       .container {
-        padding: 20px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: #ffffff;
+        color: #1a1a1a;
+        padding: 24px;
+        border-radius: 16px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        border: 1px solid rgba(0,0,0,0.05);
         transition: transform 0.3s ease;
         animation: slideIn 0.5s ease-out;
       }
@@ -61,27 +68,28 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         to { transform: translateY(0); opacity: 1; }
       }
 
+      /* Header */
       .header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 12px;
-        border-bottom: 1px solid #eee;
-        padding-bottom: 8px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid #f0f0f0;
+        padding-bottom: 12px;
       }
 
       .logo {
         font-weight: 700;
-        color: #003580; /* Booking.com blue */
+        color: #003580;
         font-size: 16px;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
       }
       
       .logo-icon {
-        width: 20px;
-        height: 20px;
+        width: 22px;
+        height: 22px;
         border-radius: 4px;
         object-fit: contain;
       }
@@ -89,16 +97,15 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       .content {
         display: flex;
         flex-direction: column;
-        gap: 8px;
       }
 
-      /* Hotel Name - Hero Element */
+      /* 2. Hotel Name: Clean & Bold */
       .hotel-name {
+        font-size: 18px;
         font-weight: 700;
         color: #003580;
-        font-size: 16px;
-        line-height: 1.3;
         margin-bottom: 8px;
+        line-height: 1.3;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
@@ -106,109 +113,106 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         text-overflow: ellipsis;
       }
 
-      /* Price Row */
+      /* 3. Price: The Hero */
       .price-row {
         display: flex;
         justify-content: space-between;
         align-items: baseline;
-        margin-bottom: 4px;
+        margin-bottom: 20px;
       }
 
       .price-label {
-        font-size: 12px;
-        color: #6b7280;
-      }
-
-      .price-value {
-        font-weight: 700;
-        color: #008009;
-        font-size: 18px;
-      }
-
-      .info-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: 14px;
-        color: #444;
-      }
-
-      .label {
-        font-weight: 500;
+        font-size: 13px;
         color: #666;
       }
 
-      .value {
-        font-weight: 700;
-        color: #003580;
+      .price-value {
+        font-size: 20px;
+        font-weight: 800;
+        color: #008009;
+        letter-spacing: -0.5px;
       }
 
+      /* Section Header */
       .section-header {
         font-size: 11px;
         font-weight: 600;
-        color: #6b7280;
+        color: #888;
         letter-spacing: 0.3px;
-        margin-top: 16px;
-        margin-bottom: 6px;
+        margin-top: 4px;
+        margin-bottom: 8px;
       }
 
-      button {
-        background: #003580;
+      /* 4. Primary Button: Modern Gradient & Shadow */
+      button, .btn-primary {
+        background: linear-gradient(135deg, #003580 0%, #0044a5 100%);
         color: white;
         border: none;
-        padding: 10px 12px;
-        border-radius: 6px;
-        font-weight: 600;
-        font-size: 13px;
-        cursor: pointer;
+        padding: 12px 0;
         width: 100%;
-        margin-top: 8px;
-        transition: background 0.2s;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        cursor: pointer;
+        box-shadow: 0 4px 6px rgba(0, 53, 128, 0.2);
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
+        gap: 8px;
+        margin-top: 0;
       }
 
-      button:hover {
-        background: #00224f;
+      button:hover, .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 12px rgba(0, 53, 128, 0.3);
       }
 
-      .secondary-link {
-        text-align: center;
-        margin-top: 4px;
-        font-size: 11px;
-        color: #9ca3af;
-        cursor: pointer;
-        text-decoration: none;
-      }
-      
-      .secondary-link:hover {
-        color: #6b7280;
-        text-decoration: underline;
+      button:active, .btn-primary:active {
+        transform: translateY(0);
       }
 
-      /* Outline-style button for Official Website */
-      .btn-outline {
+      /* 5. Secondary Button: Clean Outline */
+      .btn-outline, .btn-secondary {
         background: transparent;
-        color: #003580;
-        border: 1px solid #d1d5db;
-        padding: 8px 12px;
-        border-radius: 6px;
-        font-weight: 600;
-        cursor: pointer;
+        color: #444;
+        border: 1px solid #e0e0e0;
+        padding: 12px 0;
         width: 100%;
-        margin-top: 8px;
-        transition: background 0.2s, border-color 0.2s;
-        font-size: 13px;
+        border-radius: 8px;
+        font-weight: 500;
+        font-size: 14px;
+        cursor: pointer;
+        margin-top: 12px;
+        transition: background 0.2s ease, border-color 0.2s ease;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
+        gap: 8px;
+        box-shadow: none;
       }
 
-      .btn-outline:hover {
-        background: #f3f4f6;
-        border-color: #003580;
+      .btn-outline:hover, .btn-secondary:hover {
+        background: #f8f9fa;
+        border-color: #ccc;
+        color: #1a1a1a;
+        transform: none;
+      }
+
+      /* 6. Sub-links & Footer */
+      .secondary-link, .sub-link {
+        font-size: 12px;
+        color: #888;
+        text-align: center;
+        display: block;
+        margin-top: 8px;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .secondary-link:hover, .sub-link:hover {
+        color: #003580;
+        text-decoration: underline;
       }
 
       /* Phone link styling */
@@ -216,10 +220,10 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        margin-top: 10px;
-        font-size: 13px;
-        color: #374151;
+        gap: 8px;
+        margin-top: 12px;
+        font-size: 14px;
+        color: #444;
         text-decoration: none;
       }
 
