@@ -176,7 +176,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       .btn-outline, .btn-secondary {
         background: transparent;
         color: #444;
-        border: 1px solid #e0e0e0;
+        border: 1px solid #999;
         padding: 12px 0;
         width: 100%;
         border-radius: 8px;
@@ -201,11 +201,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
       /* 6. Sub-links & Footer */
       .secondary-link, .sub-link {
-        font-size: 12px;
-        color: #888;
+        font-size: 11px;
+        color: #999;
         text-align: center;
         display: block;
-        margin-top: 8px;
+        margin-top: 4px;
         text-decoration: none;
         cursor: pointer;
       }
@@ -223,7 +223,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         gap: 8px;
         margin-top: 12px;
         font-size: 14px;
-        color: #444;
+        color: #555;
         text-decoration: none;
       }
 
@@ -327,7 +327,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             
             <!-- Price (Hero) -->
             <div class="price-row">
-              <span class="price-label">Booking.com Price:</span>
+              <span class="price-label">Price:</span>
               <span class="price-value">${_price}</span>
             </div>
             
@@ -345,7 +345,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
               
               <!-- Email buttons (shown if found_email exists) -->
               <div id="email-actions" style="display:none;">
-                <button id="draft-email"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width: 20px; height: 20px;"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 9v.906a2.25 2.25 0 0 1-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 0 0 1.183 1.981l6.478 3.488m8.839 2.51-4.66-2.51m0 0-1.023-.55a2.25 2.25 0 0 0-2.134 0l-1.022.55m0 0-4.661 2.51m16.5 1.615a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V8.844a2.25 2.25 0 0 1 1.183-1.981l7.5-4.039a2.25 2.25 0 0 1 2.134 0l7.5 4.039a2.25 2.25 0 0 1 1.183 1.98V19.5Z" /></svg> Request Direct Offer</button>
+                <button id="draft-email"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width: 18px; height: 18px;"><path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" /><path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" /></svg> Request Offer</button>
                 <div id="open-gmail" class="secondary-link">Send via Gmail</div>
               </div>
               
@@ -866,7 +866,7 @@ Best regards,`;
           const phoneLink = document.createElement('a');
           phoneLink.className = 'phone-link';
           phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
-          phoneLink.textContent = `☎️ ${data.phone}`;
+          phoneLink.innerHTML = `<span style="font-size: 16px;">📱</span> ${data.phone}`;
           dynamicContainer.appendChild(phoneLink);
           hasAnyData = true;
         }
