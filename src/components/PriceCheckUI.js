@@ -114,6 +114,16 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         font-size: 16px;
       }
 
+      .section-header {
+        font-size: 11px;
+        font-weight: 700;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 16px;
+        margin-bottom: 4px;
+      }
+
       button {
         background: #003580;
         color: white;
@@ -285,10 +295,13 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
                 </div>
             </div>
 
-            <button id="draft-email">Draft Negotiation Email</button>
+            <!-- Section Header -->
+            <div class="section-header">Direct Deal Options</div>
+            
+            <button id="draft-email">✉️ Request Direct Offer</button>
             <div id="open-gmail" class="secondary-link">Open in Gmail</div>
             <div id="dynamic-buttons" class="dynamic-buttons"></div>
-            <div id="toast" class="toast">Screenshot copied! Psssaste it in your email.</div>
+            <div id="toast" class="toast">Screenshot copied! Paste it in your email.</div>
             </div>
         </div>
       </div>
@@ -775,7 +788,7 @@ Best regards,`;
         if (data.website) {
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
-          websiteBtn.textContent = '🌐 Official Website';
+          websiteBtn.textContent = '🌐 Book on Official Site';
           websiteBtn.addEventListener('click', () => {
             window.open(data.website, '_blank');
           });
