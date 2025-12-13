@@ -142,24 +142,42 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         font-size: 22px;
       }
 
-      /* 3. Price: The Hero */
+      /* 3. Price Row: Designed layout */
       .price-row {
         display: flex;
-        justify-content: space-between;
         align-items: baseline;
-        margin-bottom: 20px;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 10px;
+        margin-bottom: 16px;
       }
 
       .price-label {
         font-size: 13px;
-        color: #666;
+        font-weight: 600;
+        color: #64748b;
       }
 
       .price-value {
-        font-size: 20px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum" 1;
+        letter-spacing: -0.01em;
+      }
+
+      .price-currency {
+        font-size: 14px;
+        font-weight: 700;
+        margin-right: 6px;
+        color: #0a8a1f;
+        opacity: 0.9;
+      }
+
+      .price-amount {
+        font-size: 24px;
         font-weight: 800;
-        color: #008009;
-        letter-spacing: -0.5px;
+        line-height: 1.05;
+        color: #0a8a1f;
       }
 
       /* Section Header */
@@ -356,8 +374,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             
             <!-- Price (Hero) -->
             <div class="price-row">
-              <span class="price-label">Price:</span>
-              <span class="price-value">${_price}</span>
+              <span class="price-label">Price</span>
+              <span class="price-value" id="price-display">${_price}</span>
             </div>
             
             <!-- Error Tooltip -->
@@ -407,6 +425,23 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       hotelNameEl.classList.add('is-very-long');
     } else if (nameLength >= 26) {
       hotelNameEl.classList.add('is-long');
+    }
+  }
+
+  // Format price with separate currency and amount
+  const priceDisplay = shadowRoot.getElementById('price-display');
+  if (priceDisplay && _price) {
+    // Parse currency and amount from price string (e.g., "ISK 67,730" or "€ 450")
+    const priceStr = _price.trim();
+    const match = priceStr.match(/^([A-Z]{2,3}|[€$£¥₹])\s*(.+)$/i) ||
+      priceStr.match(/^(.+?)\s*([A-Z]{2,3})$/i);
+
+    if (match) {
+      const [, currency, amount] = match;
+      priceDisplay.innerHTML = `<span class="price-currency">${currency}</span><span class="price-amount">${amount}</span>`;
+    } else {
+      // Fallback: just style the whole thing as amount
+      priceDisplay.innerHTML = `<span class="price-amount">${priceStr}</span>`;
     }
   }
 
