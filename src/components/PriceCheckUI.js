@@ -115,19 +115,16 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
       /* 2. Hotel Name: Premium headline */
       .hotel-name {
-        font-size: 22px;
-        font-weight: 700;
-        color: #1a1a1a;
         margin: 0 0 12px 0;
+        font-size: 26px;
+        font-weight: 700;
         line-height: 1.15;
         letter-spacing: -0.02em;
-        text-align: left;
+        color: #0f172a;
         display: -webkit-box;
-        -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
         overflow: hidden;
-        text-overflow: ellipsis;
-        min-height: calc(22px * 1.15 * 2);
       }
 
       /* 3. Price: The Hero */
