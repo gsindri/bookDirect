@@ -107,6 +107,12 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       .value {
         font-weight: 700;
         color: #003580;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.3;
       }
       
       .value.price {
@@ -116,25 +122,29 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
       .section-header {
         font-size: 11px;
-        font-weight: 700;
+        font-weight: 600;
         color: #6b7280;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.3px;
         margin-top: 16px;
-        margin-bottom: 4px;
+        margin-bottom: 6px;
       }
 
       button {
         background: #003580;
         color: white;
         border: none;
-        padding: 10px;
+        padding: 10px 12px;
         border-radius: 6px;
         font-weight: 600;
+        font-size: 13px;
         cursor: pointer;
         width: 100%;
-        margin-top: 12px;
+        margin-top: 8px;
         transition: background 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
       }
 
       button:hover {
@@ -143,15 +153,16 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
       .secondary-link {
         text-align: center;
-        margin-top: 8px;
-        font-size: 12px;
-        color: #666;
+        margin-top: 4px;
+        font-size: 11px;
+        color: #9ca3af;
         cursor: pointer;
-        text-decoration: underline;
+        text-decoration: none;
       }
       
       .secondary-link:hover {
-        color: #003580;
+        color: #6b7280;
+        text-decoration: underline;
       }
 
       /* Outline-style button for Official Website */
@@ -280,7 +291,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             <div class="content">
             <div class="info-row">
                 <span class="label">Hotel:</span>
-                <span class="value" title="${_hotelName}">${truncate(_hotelName, 20)}</span>
+                <span class="value" title="${_hotelName}">${_hotelName}</span>
             </div>
             <div class="info-row">
                 <span class="label">Current Price:</span>
@@ -301,8 +312,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
               
               <!-- Email buttons (shown if found_email exists) -->
               <div id="email-actions" style="display:none;">
-                <button id="draft-email">✉️ Request Direct Offer</button>
-                <div id="open-gmail" class="secondary-link">Open in Gmail</div>
+                <button id="draft-email"><span class="btn-icon">✉️</span> Request Direct Offer</button>
+                <div id="open-gmail" class="secondary-link">Send via Gmail</div>
               </div>
               
               <!-- Dynamic buttons: Website & Phone -->
