@@ -86,17 +86,24 @@
 
     // --- STRATEGY 2: DETAILS PAGE (Sidebar Injection) ---
     function handleDetailsPage() {
-        // First check: Are we on a hotel detail page? Look for the hotel name element
-        const hotelNameEl = document.getElementById('hp_hotel_name') ||
-            document.querySelector('.pp-header__title') ||
-            document.querySelector('[data-testid="header-title"]');
+        // First check: Are we on a hotel detail page?
+        // Look for elements that only exist on hotel detail pages (not search results)
+        const roomTable = document.querySelector('.hprt-table') ||
+            document.querySelector('[data-block-id]') ||
+            document.querySelector('.roomstable') ||
+            document.querySelector('#hprt-table') ||
+            document.getElementById('hp_hotel_name');
 
-        if (!hotelNameEl) return false; // Not a hotel detail page
+        // Also check URL pattern for hotel pages
+        const isHotelUrl = window.location.pathname.includes('/hotel/');
+
+        if (!roomTable && !isHotelUrl) return false; // Not a hotel detail page
 
         // 1. ANCHOR: The "I'll Reserve" Button (specific selectors only, no generic submit)
         const button = document.querySelector('.js-reservation-button') ||
             document.querySelector('button[type="submit"].hprt-reservation-cta__book') ||
-            document.querySelector('.hprt-reservation-cta button[type="submit"]');
+            document.querySelector('.hprt-reservation-cta button[type="submit"]') ||
+            document.querySelector('button.bui-button--primary[type="submit"]');
 
         if (!button) return false;
 
