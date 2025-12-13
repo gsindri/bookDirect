@@ -83,8 +83,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         display: block;
         width: 70%;
         height: 1px;
-        background: rgba(0,0,0,0.04);
-        margin-top: 14px;
+        background: rgba(0,0,0,0.03);
+        margin-top: 18px;
       }
 
       .logo {
@@ -96,15 +96,16 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         align-items: center;
         gap: 6px;
         letter-spacing: 0;
+        position: relative;
+        top: 1px;
       }
       
       .logo-icon {
-        width: 20px;
-        height: 20px;
-        border-radius: 4px;
+        width: 18px;
+        height: 18px;
+        border-radius: 3px;
         object-fit: contain;
-        position: relative;
-        top: -0.5px;
+        opacity: 0.85;
       }
 
       .content {
