@@ -168,13 +168,14 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       .price-currency {
         font-size: 12px;
         font-weight: 700;
+        letter-spacing: 0.04em;
         margin-right: 6px;
         color: #0a8a1f;
-        opacity: 0.85;
+        opacity: 0.75;
       }
 
       .price-amount {
-        font-size: 24px;
+        font-size: 23px;
         font-weight: 800;
         line-height: 1.05;
         color: #0a8a1f;
