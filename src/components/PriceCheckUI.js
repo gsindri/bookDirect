@@ -1013,6 +1013,10 @@ Best regards,`;
 
   // Expose update methods
   container.updatePrice = function (newPrice) {
+    // Skip if price hasn't actually changed
+    if (newPrice === _price) return;
+
+    const oldPrice = _price;
     _price = newPrice;
     const priceDisplay = shadowRoot.getElementById('price-display');
     if (priceDisplay && newPrice) {
@@ -1028,14 +1032,16 @@ Best regards,`;
         priceDisplay.innerHTML = `<span class="price-amount">${priceStr}</span>`;
       }
 
-      // Small animation to show update
-      const amountEl = priceDisplay.querySelector('.price-amount');
-      if (amountEl) {
-        amountEl.style.transition = 'color 0.3s';
-        amountEl.style.color = '#e2aa11'; // Flash yellow/gold
-        setTimeout(() => {
-          amountEl.style.color = '#0a8a1f'; // Back to green
-        }, 500);
+      // Only flash animation if price actually changed
+      if (oldPrice && oldPrice !== newPrice) {
+        const amountEl = priceDisplay.querySelector('.price-amount');
+        if (amountEl) {
+          amountEl.style.transition = 'color 0.3s';
+          amountEl.style.color = '#e2aa11'; // Flash yellow/gold
+          setTimeout(() => {
+            amountEl.style.color = '#0a8a1f'; // Back to green
+          }, 500);
+        }
       }
     }
   };
