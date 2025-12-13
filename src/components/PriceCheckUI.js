@@ -68,28 +68,30 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         to { transform: translateY(0); opacity: 1; }
       }
 
-      /* Header */
+      /* Header - Centered badge style */
       .header {
         display: flex;
-        justify-content: space-between;
+        justify-content: center;
         align-items: center;
-        margin-bottom: 16px;
-        border-bottom: 1px solid #f0f0f0;
-        padding-bottom: 12px;
+        padding-top: 4px;
+        padding-bottom: 14px;
+        margin-bottom: 14px;
+        border-bottom: 1px solid rgba(0,0,0,0.06);
       }
 
       .logo {
-        font-weight: 700;
+        font-weight: 600;
         color: #003580;
-        font-size: 16px;
+        font-size: 15px;
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
+        letter-spacing: 0;
       }
       
       .logo-icon {
-        width: 22px;
-        height: 22px;
+        width: 20px;
+        height: 20px;
         border-radius: 4px;
         object-fit: contain;
       }
