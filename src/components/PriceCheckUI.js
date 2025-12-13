@@ -121,10 +121,22 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         line-height: 1.15;
         letter-spacing: -0.02em;
         color: #0f172a;
+        text-wrap: balance;
         display: -webkit-box;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
         overflow: hidden;
+        word-break: normal;
+        overflow-wrap: break-word;
+        hyphens: auto;
+      }
+
+      /* Dynamic size tiers for long names */
+      .hotel-name.is-long {
+        font-size: 24px;
+      }
+      .hotel-name.is-very-long {
+        font-size: 22px;
       }
 
       /* 3. Price: The Hero */
@@ -373,6 +385,18 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     `;
 
   shadowRoot.innerHTML = `<style>${baseStyle}${commonStyle}</style>${html}`;
+
+  // Apply dynamic size tier for hotel name
+  const hotelNameEl = shadowRoot.querySelector('.hotel-name');
+  if (hotelNameEl) {
+    const nameLength = _hotelName.trim().length;
+    hotelNameEl.classList.remove('is-long', 'is-very-long');
+    if (nameLength >= 34) {
+      hotelNameEl.classList.add('is-very-long');
+    } else if (nameLength >= 26) {
+      hotelNameEl.classList.add('is-long');
+    }
+  }
 
   // HELPER: Scrape and parse dates with "Smart Year" logic
   function getScrapedDates() {
