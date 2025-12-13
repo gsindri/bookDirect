@@ -127,8 +127,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         -webkit-line-clamp: 2;
         overflow: hidden;
         word-break: normal;
-        overflow-wrap: break-word;
-        hyphens: auto;
+        overflow-wrap: normal;
+        hyphens: manual;
         padding-bottom: 0.08em;
       }
 
@@ -387,9 +387,32 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
   shadowRoot.innerHTML = `<style>${baseStyle}${commonStyle}</style>${html}`;
 
+  // Soft-hyphenate long words to prevent orphan letter breaks
+  const SOFT_HYPHEN = "\u00AD";
+  function softHyphenateLongWords(text, { minLen = 14, chunk = 7, minTail = 4 } = {}) {
+    return text.split(/(\s+)/).map(part => {
+      if (/^\s+$/.test(part)) return part;
+      if (part.length < minLen || /[-\/]/.test(part)) return part;
+      if (/https?:\/\//i.test(part) || /@/.test(part)) return part;
+      let out = "";
+      let i = 0;
+      while (part.length - i > chunk + minTail) {
+        out += part.slice(i, i + chunk) + SOFT_HYPHEN;
+        i += chunk;
+      }
+      out += part.slice(i);
+      return out;
+    }).join("");
+  }
+
   // Apply dynamic size tier for hotel name
   const hotelNameEl = shadowRoot.querySelector('.hotel-name');
   if (hotelNameEl) {
+    // Apply soft hyphenation
+    hotelNameEl.textContent = softHyphenateLongWords(_hotelName.trim());
+    hotelNameEl.title = _hotelName.trim(); // Tooltip shows clean name
+
+    // Apply size tier
     const nameLength = _hotelName.trim().length;
     hotelNameEl.classList.remove('is-long', 'is-very-long');
     if (nameLength >= 34) {
