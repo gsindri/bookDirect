@@ -1014,16 +1014,29 @@ Best regards,`;
   // Expose update methods
   container.updatePrice = function (newPrice) {
     _price = newPrice;
-    const priceEl = shadowRoot.querySelector('.value.price');
-    if (priceEl) {
-      priceEl.textContent = newPrice;
+    const priceDisplay = shadowRoot.getElementById('price-display');
+    if (priceDisplay && newPrice) {
+      // Parse and format with same logic as initial render
+      const priceStr = newPrice.trim();
+      const match = priceStr.match(/^([A-Z]{2,3}|[€$£¥₹])\s*(.+)$/i) ||
+        priceStr.match(/^(.+?)\s*([A-Z]{2,3})$/i);
+
+      if (match) {
+        const [, currency, amount] = match;
+        priceDisplay.innerHTML = `<span class="price-currency">${currency}</span><span class="price-amount">${amount}</span>`;
+      } else {
+        priceDisplay.innerHTML = `<span class="price-amount">${priceStr}</span>`;
+      }
 
       // Small animation to show update
-      priceEl.style.transition = 'color 0.3s';
-      priceEl.style.color = '#e2aa11'; // Flash yellow/gold
-      setTimeout(() => {
-        priceEl.style.color = '#008009'; // Back to green
-      }, 500);
+      const amountEl = priceDisplay.querySelector('.price-amount');
+      if (amountEl) {
+        amountEl.style.transition = 'color 0.3s';
+        amountEl.style.color = '#e2aa11'; // Flash yellow/gold
+        setTimeout(() => {
+          amountEl.style.color = '#0a8a1f'; // Back to green
+        }, 500);
+      }
     }
   };
 
