@@ -118,7 +118,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         margin: 0 0 12px 0;
         font-size: 26px;
         font-weight: 700;
-        line-height: 1.15;
+        line-height: 1.2;
         letter-spacing: -0.02em;
         color: #0f172a;
         text-wrap: balance;
@@ -129,6 +129,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         word-break: normal;
         overflow-wrap: break-word;
         hyphens: auto;
+        padding-bottom: 0.08em;
       }
 
       /* Dynamic size tiers for long names */
