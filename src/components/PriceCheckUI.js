@@ -130,6 +130,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         overflow-wrap: normal;
         hyphens: auto;
         padding-bottom: 0.08em;
+        padding-right: 2px;
+        box-sizing: border-box;
       }
 
       /* Dynamic size tiers for long names */
