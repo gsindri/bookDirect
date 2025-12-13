@@ -42,16 +42,16 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       .container {
         width: 300px;
         border-radius: 12px;
-        background: rgba(255, 255, 255, 0.95);
+        background: rgba(255, 255, 255, 0.98);
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
       }
     `;
 
   const commonStyle = `
       .container {
-        padding: 16px;
+        padding: 20px;
         transition: transform 0.3s ease;
         animation: slideIn 0.5s ease-out;
       }
@@ -92,6 +92,39 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         gap: 8px;
       }
 
+      /* Hotel Name - Hero Element */
+      .hotel-name {
+        font-weight: 700;
+        color: #003580;
+        font-size: 16px;
+        line-height: 1.3;
+        margin-bottom: 8px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Price Row */
+      .price-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 4px;
+      }
+
+      .price-label {
+        font-size: 12px;
+        color: #6b7280;
+      }
+
+      .price-value {
+        font-weight: 700;
+        color: #008009;
+        font-size: 18px;
+      }
+
       .info-row {
         display: flex;
         justify-content: space-between;
@@ -107,17 +140,6 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       .value {
         font-weight: 700;
         color: #003580;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        line-height: 1.3;
-      }
-      
-      .value.price {
-        color: #008009; /* Green for price */
-        font-size: 16px;
       }
 
       .section-header {
@@ -168,34 +190,41 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       /* Outline-style button for Official Website */
       .btn-outline {
         background: transparent;
-        color: #008009;
-        border: 2px solid #008009;
-        padding: 8px;
+        color: #003580;
+        border: 1px solid #d1d5db;
+        padding: 8px 12px;
         border-radius: 6px;
         font-weight: 600;
         cursor: pointer;
         width: 100%;
         margin-top: 8px;
-        transition: background 0.2s, color 0.2s;
+        transition: background 0.2s, border-color 0.2s;
         font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
       }
 
       .btn-outline:hover {
-        background: #008009;
-        color: white;
+        background: #f3f4f6;
+        border-color: #003580;
       }
 
       /* Phone link styling */
       .phone-link {
-        display: block;
-        text-align: center;
-        margin-top: 8px;
-        font-size: 12px;
-        color: #003580;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 10px;
+        font-size: 13px;
+        color: #374151;
         text-decoration: none;
       }
 
       .phone-link:hover {
+        color: #003580;
         text-decoration: underline;
       }
 
@@ -289,13 +318,13 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             </div>
             </div>
             <div class="content">
-            <div class="info-row">
-                <span class="label">Hotel:</span>
-                <span class="value" title="${_hotelName}">${_hotelName}</span>
-            </div>
-            <div class="info-row">
-                <span class="label">Current Price:</span>
-                <span class="value price">${_price}</span>
+            <!-- Hotel Name (Hero) -->
+            <div class="hotel-name" title="${_hotelName}">${_hotelName}</div>
+            
+            <!-- Price (Hero) -->
+            <div class="price-row">
+              <span class="price-label">Booking.com Price:</span>
+              <span class="price-value">${_price}</span>
             </div>
             
             <!-- Error Tooltip -->
@@ -833,7 +862,7 @@ Best regards,`;
           const phoneLink = document.createElement('a');
           phoneLink.className = 'phone-link';
           phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
-          phoneLink.textContent = `📞 ${data.phone}`;
+          phoneLink.textContent = `☎️ ${data.phone}`;
           dynamicContainer.appendChild(phoneLink);
           hasAnyData = true;
         }
