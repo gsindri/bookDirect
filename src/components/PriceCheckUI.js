@@ -181,14 +181,15 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         color: #0a8a1f;
       }
 
-      /* Section Header */
+      /* Section Label */
       .section-header {
-        font-size: 11px;
-        font-weight: 600;
-        color: #888;
-        letter-spacing: 0.3px;
-        margin-top: 4px;
+        margin-top: 12px;
         margin-bottom: 8px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #94a3b8;
       }
 
       /* 4. Primary Button: Modern Gradient & Shadow */
