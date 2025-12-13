@@ -183,11 +183,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
       /* Section Label */
       .section-header {
-        margin-top: 12px;
-        margin-bottom: 8px;
+        margin-top: 14px;
+        margin-bottom: 10px;
         font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
+        font-weight: 650;
+        letter-spacing: 0.06em;
         text-transform: uppercase;
         color: #94a3b8;
       }
