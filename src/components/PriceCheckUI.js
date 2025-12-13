@@ -418,12 +418,17 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     hotelNameEl.textContent = _hotelName.trim();
     hotelNameEl.title = _hotelName.trim(); // Tooltip shows full name
 
-    // Apply size tier
-    const nameLength = _hotelName.trim().length;
+    // Apply size tier based on name length OR longest word length
+    const nameStr = _hotelName.trim();
+    const nameLength = nameStr.length;
+    const longestWord = nameStr.split(/\s+/).reduce((max, w) => w.length > max ? w.length : max, 0);
+
     hotelNameEl.classList.remove('is-long', 'is-very-long');
-    if (nameLength >= 34) {
+
+    // Trigger smaller size if name is long OR has a very long single word
+    if (nameLength >= 34 || longestWord >= 14) {
       hotelNameEl.classList.add('is-very-long');
-    } else if (nameLength >= 26) {
+    } else if (nameLength >= 26 || longestWord >= 12) {
       hotelNameEl.classList.add('is-long');
     }
   }
