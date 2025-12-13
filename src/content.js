@@ -86,11 +86,17 @@
 
     // --- STRATEGY 2: DETAILS PAGE (Sidebar Injection) ---
     function handleDetailsPage() {
-        // 1. ANCHOR: The "I'll Reserve" Button
-        // We find the button first, then find its MAIN container (Scope)
+        // First check: Are we on a hotel detail page? Look for the hotel name element
+        const hotelNameEl = document.getElementById('hp_hotel_name') ||
+            document.querySelector('.pp-header__title') ||
+            document.querySelector('[data-testid="header-title"]');
+
+        if (!hotelNameEl) return false; // Not a hotel detail page
+
+        // 1. ANCHOR: The "I'll Reserve" Button (specific selectors only, no generic submit)
         const button = document.querySelector('.js-reservation-button') ||
             document.querySelector('button[type="submit"].hprt-reservation-cta__book') ||
-            document.querySelector('button[type="submit"]');
+            document.querySelector('.hprt-reservation-cta button[type="submit"]');
 
         if (!button) return false;
 
