@@ -295,12 +295,19 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
                 </div>
             </div>
 
-            <!-- Section Header -->
-            <div class="section-header">Direct Deal Options</div>
-            
-            <button id="draft-email">✉️ Request Direct Offer</button>
-            <div id="open-gmail" class="secondary-link">Open in Gmail</div>
-            <div id="dynamic-buttons" class="dynamic-buttons"></div>
+            <!-- Direct Deal Section (Hidden by default, shown when data available) -->
+            <div id="direct-deal-section" style="display:none;">
+              <div class="section-header">Direct Deal Options</div>
+              
+              <!-- Email buttons (shown if found_email exists) -->
+              <div id="email-actions" style="display:none;">
+                <button id="draft-email">✉️ Request Direct Offer</button>
+                <div id="open-gmail" class="secondary-link">Open in Gmail</div>
+              </div>
+              
+              <!-- Dynamic buttons: Website & Phone -->
+              <div id="dynamic-buttons" class="dynamic-buttons"></div>
+            </div>
             <div id="toast" class="toast">Screenshot copied! Paste it in your email.</div>
             </div>
         </div>
@@ -776,15 +783,29 @@ Best regards,`;
       const cacheKey = `cache_${_hotelName}`;
       const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-      // Helper to render buttons from data
+      // Helper to render buttons from data (Ghost Logic)
       const renderButtons = (data) => {
+        const directDealSection = shadowRoot.getElementById('direct-deal-section');
+        const emailActions = shadowRoot.getElementById('email-actions');
         const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
-        if (!dynamicContainer) return;
 
-        // Clear existing buttons first
+        if (!dynamicContainer || !directDealSection) return;
+
+        // Clear existing dynamic buttons first
         dynamicContainer.innerHTML = '';
 
-        // Add Official Website button
+        // Track if we have anything to show
+        let hasAnyData = false;
+
+        // Email actions: Show only if found_email exists
+        if (data.found_email && emailActions) {
+          _foundEmail = data.found_email;
+          emailActions.style.display = 'block';
+          hasAnyData = true;
+          console.log('bookDirect: Found email:', _foundEmail);
+        }
+
+        // Website button: Show only if website exists
         if (data.website) {
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
@@ -793,21 +814,25 @@ Best regards,`;
             window.open(data.website, '_blank');
           });
           dynamicContainer.appendChild(websiteBtn);
+          hasAnyData = true;
         }
 
-        // Add Phone link
+        // Phone link: Show only if phone exists
         if (data.phone) {
           const phoneLink = document.createElement('a');
           phoneLink.className = 'phone-link';
           phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
           phoneLink.textContent = `📞 ${data.phone}`;
           dynamicContainer.appendChild(phoneLink);
+          hasAnyData = true;
         }
 
-        // Store found_email for draft email
-        if (data.found_email) {
-          _foundEmail = data.found_email;
-          console.log('bookDirect: Found email:', _foundEmail);
+        // GHOST LOGIC: Only show the entire section if we have ANY data
+        if (hasAnyData) {
+          directDealSection.style.display = 'block';
+        } else {
+          directDealSection.style.display = 'none';
+          console.log('bookDirect: No contact data found - hiding Direct Deal section');
         }
       };
 
