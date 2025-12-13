@@ -71,18 +71,27 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       /* Header - Centered badge style */
       .header {
         display: flex;
-        justify-content: center;
+        flex-direction: column;
         align-items: center;
         padding-top: 4px;
         padding-bottom: 14px;
         margin-bottom: 14px;
-        border-bottom: 1px solid rgba(0,0,0,0.06);
+      }
+
+      .header::after {
+        content: '';
+        display: block;
+        width: 70%;
+        height: 1px;
+        background: rgba(0,0,0,0.04);
+        margin-top: 14px;
       }
 
       .logo {
         font-weight: 600;
         color: #003580;
-        font-size: 15px;
+        font-size: 14px;
+        opacity: 0.9;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -94,6 +103,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         height: 20px;
         border-radius: 4px;
         object-fit: contain;
+        position: relative;
+        top: -0.5px;
       }
 
       .content {
