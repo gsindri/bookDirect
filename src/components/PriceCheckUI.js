@@ -113,13 +113,14 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         flex-direction: column;
       }
 
-      /* 2. Hotel Name: Clean & Bold */
+      /* 2. Hotel Name: Premium headline */
       .hotel-name {
         font-size: 18px;
         font-weight: 700;
-        color: #003580;
+        color: #1a1a1a;
         margin-bottom: 8px;
-        line-height: 1.3;
+        line-height: 1.15;
+        letter-spacing: -0.015em;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
