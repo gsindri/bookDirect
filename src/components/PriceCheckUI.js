@@ -322,9 +322,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
       .btn-outline span, .btn-secondary span {
         white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
         line-height: 1;
+        font-size: 13px;
       }
 
       .btn-outline svg, .btn-secondary svg,
