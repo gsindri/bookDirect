@@ -333,6 +333,15 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         text-decoration: underline;
       }
 
+      /* Microcopy styling */
+      .microcopy {
+        font-size: 10px;
+        color: #999;
+        text-align: center;
+        margin-top: 4px;
+        margin-bottom: 2px;
+      }
+
       /* Phone link styling */
       .phone-link {
         display: flex;
@@ -479,7 +488,13 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
               <!-- Email buttons (shown if found_email exists) -->
               <div id="email-actions" style="display:none;">
                 <button id="draft-email"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width: 18px; height: 18px;"><path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" /><path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" /></svg> Request Offer</button>
+                <div class="microcopy">Opens a draft – you review before sending</div>
                 <div id="open-gmail" class="secondary-link">Send via Gmail</div>
+              </div>
+              
+              <!-- Contact fallback (shown if website exists but no email) -->
+              <div id="contact-fallback" style="display:none;">
+                <button id="open-contact"><svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.547 4.505a8.25 8.25 0 013.453-.255v5.25H6.75a6.75 6.75 0 011.797-4.995zm3.453 14.99a8.25 8.25 0 01-3.453-.255 6.75 6.75 0 01-1.797-4.995h5.25v5.25zm1.5-14.99a8.25 8.25 0 013.453.255 6.75 6.75 0 011.797 4.995h-5.25V4.505zm3.453 14.99a8.25 8.25 0 003.453-.255 6.75 6.75 0 001.797-4.995h-5.25v5.25zM12 11.25v5.25a6.75 6.75 0 005.25-6.75h-5.25v1.5zm0-1.5V4.5a6.75 6.75 0 00-5.25 6.75h5.25v-1.5z" clip-rule="evenodd" /></svg> Open Contact Page</button>
               </div>
               
               <!-- Dynamic buttons: Website & Phone -->
@@ -1023,14 +1038,42 @@ Best regards,`;
           emailActions.style.display = 'block';
           hasAnyData = true;
           console.log('bookDirect: Found email:', _foundEmail);
+        } else if (data.website && !data.found_email) {
+          // Contact fallback: If website exists but no email, show contact page button
+          const contactFallback = shadowRoot.getElementById('contact-fallback');
+          if (contactFallback) {
+            contactFallback.style.display = 'block';
+            const openContactBtn = shadowRoot.getElementById('open-contact');
+            if (openContactBtn) {
+              openContactBtn.onclick = () => {
+                // Try common contact page paths, fallback to main site
+                window.open(data.website, '_blank');
+              };
+            }
+            hasAnyData = true;
+          }
         }
 
         // Website button: Show only if website exists
         if (data.website) {
+          // Extract domain for trust label
+          let domain = '';
+          try {
+            const url = new URL(data.website);
+            domain = url.hostname.replace(/^www\./, '');
+          } catch (e) {
+            domain = '';
+          }
+
+          // Use domain if short enough, otherwise fallback
+          const buttonLabel = domain && domain.length <= 20
+            ? `Book on ${domain}`
+            : 'Book Direct';
+
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
-          websiteBtn.innerHTML = '<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.547 4.505a8.25 8.25 0 013.453-.255v5.25H6.75a6.75 6.75 0 011.797-4.995zm3.453 14.99a8.25 8.25 0 01-3.453-.255 6.75 6.75 0 01-1.797-4.995h5.25v5.25zm1.5-14.99a8.25 8.25 0 013.453.255 6.75 6.75 0 011.797 4.995h-5.25V4.505zm3.453 14.99a8.25 8.25 0 003.453-.255 6.75 6.75 0 001.797-4.995h-5.25v5.25zM12 11.25v5.25a6.75 6.75 0 005.25-6.75h-5.25v1.5zm0-1.5V4.5a6.75 6.75 0 00-5.25 6.75h5.25v-1.5z" clip-rule="evenodd" /></svg> <span>Book Direct</span>';
-          websiteBtn.title = 'Open official website';
+          websiteBtn.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.547 4.505a8.25 8.25 0 013.453-.255v5.25H6.75a6.75 6.75 0 011.797-4.995zm3.453 14.99a8.25 8.25 0 01-3.453-.255 6.75 6.75 0 01-1.797-4.995h5.25v5.25zm1.5-14.99a8.25 8.25 0 013.453.255 6.75 6.75 0 011.797 4.995h-5.25V4.505zm3.453 14.99a8.25 8.25 0 003.453-.255 6.75 6.75 0 001.797-4.995h-5.25v5.25zM12 11.25v5.25a6.75 6.75 0 005.25-6.75h-5.25v1.5zm0-1.5V4.5a6.75 6.75 0 00-5.25 6.75h5.25v-1.5z" clip-rule="evenodd" /></svg> <span>${buttonLabel}</span>`;
+          websiteBtn.title = `Open ${domain || 'official website'}`;
           websiteBtn.addEventListener('click', () => {
             window.open(data.website, '_blank');
           });
