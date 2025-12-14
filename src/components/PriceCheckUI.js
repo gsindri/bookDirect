@@ -539,7 +539,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
               
               <!-- Contact fallback (shown if website exists but no email) -->
               <div id="contact-fallback" style="display:none;">
-                <button id="open-contact"><svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.547 4.505a8.25 8.25 0 013.453-.255v5.25H6.75a6.75 6.75 0 011.797-4.995zm3.453 14.99a8.25 8.25 0 01-3.453-.255 6.75 6.75 0 01-1.797-4.995h5.25v5.25zm1.5-14.99a8.25 8.25 0 013.453.255 6.75 6.75 0 011.797 4.995h-5.25V4.505zm3.453 14.99a8.25 8.25 0 003.453-.255 6.75 6.75 0 001.797-4.995h-5.25v5.25zM12 11.25v5.25a6.75 6.75 0 005.25-6.75h-5.25v1.5zm0-1.5V4.5a6.75 6.75 0 00-5.25 6.75h5.25v-1.5z" clip-rule="evenodd" /></svg> Open Contact Page</button>
+                <button id="open-contact"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width: 20px; height: 20px;"><path fill-rule="evenodd" d="M15.75 2.25H21a.75.75 0 0 1 .75.75v5.25a.75.75 0 0 1-1.5 0V4.81l-8.97 8.97a.75.75 0 1 1-1.06-1.06l8.97-8.97h-3.44a.75.75 0 0 1 0-1.5Zm-10.5 4.5a1.5 1.5 0 0 0-1.5 1.5v10.5a1.5 1.5 0 0 0 1.5 1.5h10.5a1.5 1.5 0 0 0 1.5-1.5V10.5a.75.75 0 0 1 1.5 0v8.25a3 3 0 0 1-3 3H5.25a3 3 0 0 1-3-3V8.25a3 3 0 0 1 3-3h8.25a.75.75 0 0 1 0 1.5H5.25Z" clip-rule="evenodd" /></svg> Open Contact Page</button>
               </div>
               
               <!-- Dynamic buttons: Website & Phone -->
