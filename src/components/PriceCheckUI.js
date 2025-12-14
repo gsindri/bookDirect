@@ -1014,7 +1014,8 @@ Best regards,`;
         if (data.website) {
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
-          websiteBtn.innerHTML = '🌐 <span>Book on Official Site</span>';
+          websiteBtn.innerHTML = '🌐 <span>Book direct</span>';
+          websiteBtn.title = 'Open official website';
           websiteBtn.addEventListener('click', () => {
             window.open(data.website, '_blank');
           });
