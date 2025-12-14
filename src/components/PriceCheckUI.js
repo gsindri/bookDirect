@@ -255,6 +255,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         height: 50px;
         padding: 0 16px;
         display: flex;
+        flex-wrap: nowrap;
         align-items: center;
         justify-content: center;
         gap: 10px;
@@ -263,13 +264,20 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         color: #0f172a;
         border: 1px solid rgba(15, 23, 42, 0.18);
         box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 650;
         letter-spacing: -0.01em;
         cursor: pointer;
         margin-top: 12px;
         text-decoration: none;
         transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+      }
+
+      .btn-outline span, .btn-secondary span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1;
       }
 
       .btn-outline svg, .btn-secondary svg,
@@ -1006,7 +1014,7 @@ Best regards,`;
         if (data.website) {
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
-          websiteBtn.textContent = '🌐 Book on Official Site';
+          websiteBtn.innerHTML = '🌐 <span>Book on Official Site</span>';
           websiteBtn.addEventListener('click', () => {
             window.open(data.website, '_blank');
           });
