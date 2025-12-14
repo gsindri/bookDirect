@@ -209,8 +209,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         letter-spacing: -0.01em;
         cursor: pointer;
         box-shadow:
-          0 10px 18px rgba(2,6,23,0.16),
-          0  2px  6px rgba(2,6,23,0.10);
+          0 10px 18px rgba(2,6,23,0.14),
+          0  2px  6px rgba(2,6,23,0.08);
         transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
       }
 
@@ -223,8 +223,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       button:hover, .btn-primary:hover {
         transform: translateY(-1px);
         box-shadow:
-          0 14px 24px rgba(2,6,23,0.18),
-          0  3px  8px rgba(2,6,23,0.12);
+          0 14px 24px rgba(2,6,23,0.16),
+          0  3px  8px rgba(2,6,23,0.10);
         filter: brightness(1.02);
       }
 
@@ -278,9 +278,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
       /* 6. Helper caption (Gmail link) */
       .secondary-link, .sub-link {
-        margin-top: 8px;
+        margin-top: 10px;
         font-size: 12px;
+        font-weight: 500;
         color: #94a3b8;
+        line-height: 1.2;
         text-align: center;
         display: block;
         text-decoration: none;
