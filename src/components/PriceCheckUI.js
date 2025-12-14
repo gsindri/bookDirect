@@ -1110,15 +1110,10 @@ Best regards,`;
             domain = '';
           }
 
-          // Use domain if short enough, otherwise fallback
-          const buttonLabel = domain && domain.length <= 20
-            ? `Book on ${domain}`
-            : 'Book Direct';
-
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
-          websiteBtn.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.547 4.505a8.25 8.25 0 013.453-.255v5.25H6.75a6.75 6.75 0 011.797-4.995zm3.453 14.99a8.25 8.25 0 01-3.453-.255 6.75 6.75 0 01-1.797-4.995h5.25v5.25zm1.5-14.99a8.25 8.25 0 013.453.255 6.75 6.75 0 011.797 4.995h-5.25V4.505zm3.453 14.99a8.25 8.25 0 003.453-.255 6.75 6.75 0 001.797-4.995h-5.25v5.25zM12 11.25v5.25a6.75 6.75 0 005.25-6.75h-5.25v1.5zm0-1.5V4.5a6.75 6.75 0 00-5.25 6.75h5.25v-1.5z" clip-rule="evenodd" /></svg> <span>${buttonLabel}</span>`;
-          websiteBtn.title = `Open ${domain || 'official website'}`;
+          websiteBtn.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.547 4.505a8.25 8.25 0 013.453-.255v5.25H6.75a6.75 6.75 0 011.797-4.995zm3.453 14.99a8.25 8.25 0 01-3.453-.255 6.75 6.75 0 01-1.797-4.995h5.25v5.25zm1.5-14.99a8.25 8.25 0 013.453.255 6.75 6.75 0 011.797 4.995h-5.25V4.505zm3.453 14.99a8.25 8.25 0 003.453-.255 6.75 6.75 0 001.797-4.995h-5.25v5.25zM12 11.25v5.25a6.75 6.75 0 005.25-6.75h-5.25v1.5zm0-1.5V4.5a6.75 6.75 0 00-5.25 6.75h5.25v-1.5z" clip-rule="evenodd" /></svg> <span>Book Direct</span>`;
+          websiteBtn.title = domain ? `Go to ${domain}` : 'Go to official website';
           websiteBtn.addEventListener('click', () => {
             window.open(data.website, '_blank');
           });
