@@ -192,33 +192,61 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         color: #94a3b8;
       }
 
-      /* 4. Primary Button: Modern Gradient & Shadow */
+      /* 4. Primary Button: Premium styling */
       button, .btn-primary {
-        background: linear-gradient(135deg, #003580 0%, #0044a5 100%);
-        color: white;
-        border: none;
-        padding: 12px 0;
         width: 100%;
-        border-radius: 8px;
-        font-weight: 600;
-        font-size: 14px;
-        cursor: pointer;
-        box-shadow: 0 4px 6px rgba(0, 53, 128, 0.2);
-        transition: transform 0.1s ease, box-shadow 0.1s ease;
+        height: 50px;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 8px;
-        margin-top: 0;
+        gap: 10px;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.10);
+        background: #0b4bb3;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        cursor: pointer;
+        box-shadow:
+          0 10px 18px rgba(2,6,23,0.16),
+          0  2px  6px rgba(2,6,23,0.10);
+        transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
+      }
+
+      button svg, .btn-primary svg {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
       }
 
       button:hover, .btn-primary:hover {
         transform: translateY(-1px);
-        box-shadow: 0 6px 12px rgba(0, 53, 128, 0.3);
+        box-shadow:
+          0 14px 24px rgba(2,6,23,0.18),
+          0  3px  8px rgba(2,6,23,0.12);
+        filter: brightness(1.02);
       }
 
       button:active, .btn-primary:active {
-        transform: translateY(0);
+        transform: translateY(0px);
+        box-shadow:
+          0  8px 14px rgba(2,6,23,0.16),
+          0  2px  6px rgba(2,6,23,0.10);
+        filter: brightness(0.98);
+      }
+
+      button:focus-visible, .btn-primary:focus-visible {
+        outline: none;
+        box-shadow:
+          0 0 0 3px rgba(59,130,246,0.35),
+          0 10px 18px rgba(2,6,23,0.16),
+          0  2px  6px rgba(2,6,23,0.10);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        button, .btn-primary { transition: none; }
+        button:hover, .btn-primary:hover { transform: none; }
       }
 
       /* 5. Secondary Button: Clean Outline */
@@ -228,7 +256,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         border: 1px solid #999;
         padding: 12px 0;
         width: 100%;
-        border-radius: 8px;
+        border-radius: 14px;
         font-weight: 500;
         font-size: 14px;
         cursor: pointer;
@@ -248,13 +276,13 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         transform: none;
       }
 
-      /* 6. Sub-links & Footer */
+      /* 6. Helper caption (Gmail link) */
       .secondary-link, .sub-link {
-        font-size: 11px;
-        color: #999;
+        margin-top: 8px;
+        font-size: 12px;
+        color: #94a3b8;
         text-align: center;
         display: block;
-        margin-top: 4px;
         text-decoration: none;
         cursor: pointer;
       }
