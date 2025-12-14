@@ -249,31 +249,62 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         button:hover, .btn-primary:hover { transform: none; }
       }
 
-      /* 5. Secondary Button: Clean Outline */
+      /* 5. Secondary Button: Premium styling */
       .btn-outline, .btn-secondary {
-        background: transparent;
-        color: #444;
-        border: 1px solid #999;
-        padding: 12px 0;
         width: 100%;
-        border-radius: 14px;
-        font-weight: 500;
-        font-size: 14px;
-        cursor: pointer;
-        margin-top: 12px;
-        transition: background 0.2s ease, border-color 0.2s ease;
+        height: 50px;
+        padding: 0 16px;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 8px;
-        box-shadow: none;
+        gap: 10px;
+        border-radius: 14px;
+        background: #ffffff;
+        color: #0f172a;
+        border: 1px solid rgba(15, 23, 42, 0.18);
+        box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+        cursor: pointer;
+        margin-top: 12px;
+        text-decoration: none;
+        transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+      }
+
+      .btn-outline svg, .btn-secondary svg,
+      .btn-outline img, .btn-secondary img {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        opacity: 0.9;
       }
 
       .btn-outline:hover, .btn-secondary:hover {
-        background: #f8f9fa;
-        border-color: #ccc;
-        color: #1a1a1a;
-        transform: none;
+        background: rgba(15, 23, 42, 0.02);
+        border-color: rgba(15, 23, 42, 0.24);
+        box-shadow:
+          0 10px 18px rgba(2,6,23,0.06),
+          0  2px  6px rgba(2,6,23,0.04);
+        transform: translateY(-1px);
+      }
+
+      .btn-outline:active, .btn-secondary:active {
+        transform: translateY(0px);
+        background: rgba(15, 23, 42, 0.03);
+        box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+      }
+
+      .btn-outline:focus-visible, .btn-secondary:focus-visible {
+        outline: none;
+        box-shadow:
+          0 0 0 3px rgba(59,130,246,0.22),
+          0 1px 0 rgba(15, 23, 42, 0.04);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .btn-outline, .btn-secondary { transition: none; }
+        .btn-outline:hover, .btn-secondary:hover { transform: none; }
       }
 
       /* 6. Helper caption (Gmail link) */
