@@ -192,6 +192,53 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         color: #94a3b8;
       }
 
+      /* Info icon tooltip */
+      .info-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px;
+        height: 14px;
+        margin-left: 6px;
+        font-size: 10px;
+        color: #94a3b8;
+        cursor: help;
+        position: relative;
+        vertical-align: middle;
+      }
+
+      .info-icon::before {
+        content: 'ⓘ';
+      }
+
+      .info-icon::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        margin-bottom: 6px;
+        padding: 8px 12px;
+        background: #1a1a1a;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 400;
+        letter-spacing: 0;
+        text-transform: none;
+        white-space: nowrap;
+        border-radius: 6px;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s ease, visibility 0.2s ease;
+        z-index: 1000;
+        pointer-events: none;
+      }
+
+      .info-icon:hover::after {
+        opacity: 1;
+        visibility: visible;
+      }
+
       /* 4. Primary Button: Premium styling */
       button, .btn-primary {
         width: 100%;
@@ -483,12 +530,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
             <!-- Direct Deal Section (Hidden by default, shown when data available) -->
             <div id="direct-deal-section" style="display:none;">
-              <div class="section-header">Direct Deal Options</div>
+              <div class="section-header">Direct Deal Options<span class="info-icon" data-tooltip="We draft the email for you. Nothing is sent automatically."></span></div>
               
               <!-- Email buttons (shown if found_email exists) -->
               <div id="email-actions" style="display:none;">
                 <button id="draft-email"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="width: 18px; height: 18px;"><path d="M1.5 8.67v8.58a3 3 0 003 3h15a3 3 0 003-3V8.67l-8.928 5.493a3 3 0 01-3.144 0L1.5 8.67z" /><path d="M22.5 6.908V6.75a3 3 0 00-3-3h-15a3 3 0 00-3 3v.158l9.714 5.978a1.5 1.5 0 001.572 0L22.5 6.908z" /></svg> Request Offer</button>
-                <div class="microcopy">Opens a draft – you review before sending</div>
                 <div id="open-gmail" class="secondary-link">Send via Gmail</div>
               </div>
               
