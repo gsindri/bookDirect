@@ -339,15 +339,22 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         align-items: center;
         justify-content: center;
         gap: 8px;
-        margin-top: 12px;
-        font-size: 14px;
-        color: #555;
+        margin-top: 15px;
+        font-size: 13px;
+        font-weight: 500;
+        color: rgba(0, 53, 128, 0.8);
         text-decoration: none;
+        transition: all 0.2s ease;
       }
 
       .phone-link:hover {
         color: #003580;
         text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      .phone-link svg {
+        fill: currentColor;
       }
 
       /* Shared icon styling */
@@ -356,7 +363,6 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         height: 18px;
         flex: 0 0 auto;
         display: block;
-        opacity: 0.9;
       }
 
       /* Container for dynamic buttons */
@@ -1023,7 +1029,7 @@ Best regards,`;
         if (data.website) {
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
-          websiteBtn.innerHTML = '<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418" /></svg> <span>Book direct</span>';
+          websiteBtn.innerHTML = '<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.547 4.505a8.25 8.25 0 013.453-.255v5.25H6.75a6.75 6.75 0 011.797-4.995zm3.453 14.99a8.25 8.25 0 01-3.453-.255 6.75 6.75 0 01-1.797-4.995h5.25v5.25zm1.5-14.99a8.25 8.25 0 013.453.255 6.75 6.75 0 011.797 4.995h-5.25V4.505zm3.453 14.99a8.25 8.25 0 003.453-.255 6.75 6.75 0 001.797-4.995h-5.25v5.25zM12 11.25v5.25a6.75 6.75 0 005.25-6.75h-5.25v1.5zm0-1.5V4.5a6.75 6.75 0 00-5.25 6.75h5.25v-1.5z" clip-rule="evenodd" /></svg> <span>Book Direct</span>';
           websiteBtn.title = 'Open official website';
           websiteBtn.addEventListener('click', () => {
             window.open(data.website, '_blank');
@@ -1037,7 +1043,7 @@ Best regards,`;
           const phoneLink = document.createElement('a');
           phoneLink.className = 'phone-link';
           phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
-          phoneLink.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" /></svg> ${data.phone}`;
+          phoneLink.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clip-rule="evenodd" /></svg> ${data.phone}`;
           dynamicContainer.appendChild(phoneLink);
           hasAnyData = true;
         }
