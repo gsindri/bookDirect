@@ -141,7 +141,9 @@
         setTimeout(() => schedulePrefetch("delayed-1s"), 1000);
         setTimeout(() => schedulePrefetch("delayed-3s"), 3000);
 
-        // IMPORTANT: Do not continue into hotel-page injection logic on results pages.
+        // IMPORTANT: Set global flag to stop hotel-page IIFE from running
+        // (return only exits this IIFE, not the whole file)
+        window.__bookDirect_isSearchPage = true;
         log("Exiting early - search results page does not need hotel UI injection");
         return;
     }
@@ -153,6 +155,12 @@
 // HOTEL PAGE LOGIC - Only runs if not a search results page
 // =============================================
 (function () {
+    // Guard: don't run hotel-page logic on search results pages
+    if (window.__bookDirect_isSearchPage) {
+        console.log('bookDirect: Skipping hotel page flow (on search results page)');
+        return;
+    }
+
     console.log('bookDirect: Content script started (hotel page flow)');
 
     // Global reference to our UI app

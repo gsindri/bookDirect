@@ -25,22 +25,55 @@ function normHl(hl) {
 }
 
 // Build a consistent key for ctx storage based on travel params
+// Note: doesn't include 'q' since hotel pages don't have search term
 function ctxKey({ checkIn, checkOut, adults, currency, gl, hl }) {
     return `${CTX_PREFIX}${checkIn}:${checkOut}:${adults || 2}:${normCurrency(currency)}:${normGl(gl)}:${normHl(hl)}`;
 }
 
-// Store ctxId in chrome.storage.session (survives tab changes)
-async function storeCtxId(params, ctxId) {
-    const key = ctxKey(params);
-    await chrome.storage.session.set({ [key]: { ctxId, ts: Date.now() } });
-    console.log("bookDirect: Stored ctxId in session storage", key, ctxId);
+// Store ctxId in chrome.storage.session
+// Store by BOTH tabId (primary) and itinerary key (fallback for new-tab)
+async function storeCtxId(params, ctxId, tabId) {
+    const itineraryKey = ctxKey(params);
+    const tabKey = tabId ? `${CTX_PREFIX}tab:${tabId}` : null;
+
+    const toStore = { ctxId, ts: Date.now(), checkIn: params.checkIn, checkOut: params.checkOut };
+
+    // Store by itinerary (fallback for new-tab opens)
+    await chrome.storage.session.set({ [itineraryKey]: toStore });
+    console.log("bookDirect: Stored ctxId by itinerary", itineraryKey, ctxId);
+
+    // Store by tabId (primary for same-tab navigation)
+    if (tabKey) {
+        await chrome.storage.session.set({ [tabKey]: toStore });
+        console.log("bookDirect: Stored ctxId by tabId", tabKey, ctxId);
+    }
 }
 
 // Load ctxId from chrome.storage.session
-async function loadCtxId(params) {
-    const key = ctxKey(params);
-    const obj = await chrome.storage.session.get(key);
-    return obj?.[key]?.ctxId || null;
+// Try tabId first (same-tab navigation), then fall back to itinerary key
+async function loadCtxId(params, tabId) {
+    // 1) Try tabId first (most reliable for same-tab navigation)
+    if (tabId) {
+        const tabKey = `${CTX_PREFIX}tab:${tabId}`;
+        const tabObj = await chrome.storage.session.get(tabKey);
+        if (tabObj?.[tabKey]?.ctxId) {
+            // Verify dates match (in case tab navigated to different itinerary)
+            const stored = tabObj[tabKey];
+            if (stored.checkIn === params.checkIn && stored.checkOut === params.checkOut) {
+                console.log("bookDirect: Loaded ctxId from tabId", tabKey, stored.ctxId);
+                return stored.ctxId;
+            }
+        }
+    }
+
+    // 2) Fallback to itinerary key (for new-tab opens)
+    const itineraryKey = ctxKey(params);
+    const obj = await chrome.storage.session.get(itineraryKey);
+    const ctxId = obj?.[itineraryKey]?.ctxId || null;
+    if (ctxId) {
+        console.log("bookDirect: Loaded ctxId from itinerary", itineraryKey, ctxId);
+    }
+    return ctxId;
 }
 
 // --- STATE ---
@@ -60,11 +93,12 @@ function getCompareKey(tabId, params) {
 }
 
 // --- COMPARE API CLIENT ---
-async function fetchCompare(params, forceRefresh = false) {
+async function fetchCompare(params, forceRefresh = false, tabId = null) {
     const url = new URL(`${WORKER_BASE_URL}/compare`);
 
     // Look up ctxId from session storage BEFORE building URL
-    const ctxId = await loadCtxId(params);
+    // Pass tabId for same-tab lookup, falls back to itinerary key
+    const ctxId = await loadCtxId(params, tabId);
     if (ctxId) {
         console.log("bookDirect: Using ctxId for /compare:", ctxId);
     } else {
@@ -147,7 +181,8 @@ async function fetchCompareDeduped(tabId, params, forceRefresh = false) {
     // Create new request promise
     const requestPromise = (async () => {
         try {
-            const data = await fetchCompare(params, forceRefresh);
+            // Pass tabId for same-tab ctx lookup
+            const data = await fetchCompare(params, forceRefresh, tabId);
 
             // Track the result for retry logic
             const hadOfficialUrl = !!(params.officialUrl);
@@ -274,9 +309,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             .then(async (data) => {
                 console.log('bookDirect: Prefetch result:', data);
                 if (data.ok && data.ctxId) {
-                    // Store ctxId in chrome.storage.session using normalized travel params as key
-                    // This survives tab changes and can be looked up by any tab with same itinerary
-                    await storeCtxId(payload, data.ctxId);
+                    // Store ctxId by both tabId (primary) and itinerary key (fallback)
+                    await storeCtxId(payload, data.ctxId, tabId);
                     sendResponse({ ok: true, ctxId: data.ctxId, count: data.count, cache: data.cache });
                 } else {
                     sendResponse({ ok: false, error: data.error || 'Prefetch failed' });
