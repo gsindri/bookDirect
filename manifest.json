@@ -11,7 +11,7 @@
     ],
     "host_permissions": [
         "*://*.booking.com/*",
-        "<all_urls>"
+        "https://hotelfinder.gsindrih.workers.dev/*"
     ],
     "background": {
         "service_worker": "src/background.js"
