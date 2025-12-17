@@ -4,9 +4,44 @@ console.log('bookDirect background service worker loaded.');
 const WORKER_BASE_URL = 'https://hotelfinder.gsindrih.workers.dev';
 const COMPARE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const OFFICIAL_URL_WAIT_MS = 3500; // Wait for officialUrl before fallback
+const CTX_PREFIX = "bd_ctx_v1:";
 
 // DEV flag: set to true to enable debug mode in /compare calls
 const DEV_DEBUG = false;
+
+// --- CTX STORAGE HELPERS ---
+// Normalize currency to 3-letter ISO code (default USD)
+function normCurrency(c) {
+    const s = (c || "").trim().toUpperCase();
+    return /^[A-Z]{3}$/.test(s) ? s : "USD";
+}
+
+function normGl(gl) {
+    return (gl || "us").trim().toLowerCase();
+}
+
+function normHl(hl) {
+    return (hl || "").trim().toLowerCase();
+}
+
+// Build a consistent key for ctx storage based on travel params
+function ctxKey({ checkIn, checkOut, adults, currency, gl, hl }) {
+    return `${CTX_PREFIX}${checkIn}:${checkOut}:${adults || 2}:${normCurrency(currency)}:${normGl(gl)}:${normHl(hl)}`;
+}
+
+// Store ctxId in chrome.storage.session (survives tab changes)
+async function storeCtxId(params, ctxId) {
+    const key = ctxKey(params);
+    await chrome.storage.session.set({ [key]: { ctxId, ts: Date.now() } });
+    console.log("bookDirect: Stored ctxId in session storage", key, ctxId);
+}
+
+// Load ctxId from chrome.storage.session
+async function loadCtxId(params) {
+    const key = ctxKey(params);
+    const obj = await chrome.storage.session.get(key);
+    return obj?.[key]?.ctxId || null;
+}
 
 // --- STATE ---
 // Store page context per tab
@@ -28,18 +63,26 @@ function getCompareKey(tabId, params) {
 async function fetchCompare(params, forceRefresh = false) {
     const url = new URL(`${WORKER_BASE_URL}/compare`);
 
+    // Look up ctxId from session storage BEFORE building URL
+    const ctxId = await loadCtxId(params);
+    if (ctxId) {
+        console.log("bookDirect: Using ctxId for /compare:", ctxId);
+    } else {
+        console.log("bookDirect: No ctxId found for this itinerary");
+    }
+
     // Build query params
     const paramMap = {
         hotelName: params.hotelName,
         checkIn: params.checkIn,
         checkOut: params.checkOut,
         adults: params.adults,
-        currency: params.currency,
-        gl: params.gl,
+        currency: normCurrency(params.currency), // Normalize to ensure ctx key matching
+        gl: normGl(params.gl),
         hl: params.hl,
         officialUrl: params.officialUrl,
         currentHost: params.currentHost,
-        ctx: params.ctx  // Search context ID (from prefetch)
+        ctx: ctxId // Use looked-up ctx, not params.ctx
     };
 
     Object.entries(paramMap).forEach(([key, value]) => {
@@ -74,7 +117,12 @@ async function fetchCompare(params, forceRefresh = false) {
         }
 
         const data = await response.json();
-        console.log('bookDirect: Compare success:', data.cache, data.offersCount, 'offers');
+        console.log('bookDirect: Compare success:', {
+            cache: data.cache,
+            offers: data.offersCount,
+            token: data.match?.cacheDetail?.token || '(no token info)',
+            ctxUsed: ctxId ? 'yes' : 'no'
+        });
         return data;
     } catch (err) {
         console.error('bookDirect: Compare fetch failed', err);
@@ -215,25 +263,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         prefetchUrl.searchParams.set('checkIn', payload.checkIn || '');
         prefetchUrl.searchParams.set('checkOut', payload.checkOut || '');
         prefetchUrl.searchParams.set('adults', String(payload.adults || 2));
-        prefetchUrl.searchParams.set('currency', payload.currency || 'USD');
-        prefetchUrl.searchParams.set('gl', payload.gl || 'us');
+        prefetchUrl.searchParams.set('currency', normCurrency(payload.currency));
+        prefetchUrl.searchParams.set('gl', normGl(payload.gl));
         prefetchUrl.searchParams.set('hl', payload.hl || 'en-US');
 
         console.log('bookDirect: Calling /prefetchCtx', prefetchUrl.toString());
 
         fetch(prefetchUrl.toString())
             .then(res => res.json())
-            .then(data => {
+            .then(async (data) => {
                 console.log('bookDirect: Prefetch result:', data);
                 if (data.ok && data.ctxId) {
-                    // Store ctxId in session storage (accessible by content scripts)
-                    // Also store in tabContexts for this tab
-                    if (tabId) {
-                        const context = tabContexts.get(tabId) || {};
-                        context.ctxId = data.ctxId;
-                        context.signatureKey = message.signatureKey;
-                        tabContexts.set(tabId, context);
-                    }
+                    // Store ctxId in chrome.storage.session using normalized travel params as key
+                    // This survives tab changes and can be looked up by any tab with same itinerary
+                    await storeCtxId(payload, data.ctxId);
                     sendResponse({ ok: true, ctxId: data.ctxId, count: data.count, cache: data.cache });
                 } else {
                     sendResponse({ ok: false, error: data.error || 'Prefetch failed' });
