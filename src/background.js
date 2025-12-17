@@ -306,9 +306,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     if (shouldRetryWithOfficialUrl(tabId, params, message.officialUrl)) {
                         markRetriedWithOfficialUrl(tabId, params);
 
-                        // Trigger retry with officialUrl and refresh=1
-                        console.log('bookDirect: Auto-retrying compare with officialUrl');
-                        fetchCompareDeduped(tabId, params, true).then(data => {
+                        // Trigger retry with officialUrl (but keep caches/ctx enabled)
+                        // NOTE: forceRefresh=false preserves ctx lookup, refresh=1 is for manual user action only
+                        console.log('bookDirect: Auto-retrying compare with officialUrl (keeping caches)');
+                        fetchCompareDeduped(tabId, params, false).then(data => {
                             if (!data.error) {
                                 setCachedCompare(tabId, params, data);
                             }
