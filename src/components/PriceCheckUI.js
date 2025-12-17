@@ -956,7 +956,7 @@ Best regards,`;
     // Create a temporary div in the body (outside shadow root)
     const bubble = document.createElement('div');
     bubble.style.cssText = `
-        position: absolute;
+        position: fixed;
         background: #ffebeb;
         color: #d4111e;
         border: 1px solid #d4111e;
@@ -1005,15 +1005,15 @@ Best regards,`;
     bubble.appendChild(arrowInner);
     document.body.appendChild(bubble);
 
-    // Position it
+    // Position it using FIXED positioning (viewport-relative, no scroll offsets)
     const rect = firstSelect.getBoundingClientRect();
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
 
     // Position: To the RIGHT of the select, vertically centered
-    // rect.right + spacing
-    bubble.style.top = (rect.top + scrollTop + (rect.height / 2) - 20) + 'px'; // Center roughly
-    bubble.style.left = (rect.right + scrollLeft + 12) + 'px';
+    // Clamp horizontally to prevent overflow beyond viewport
+    const desiredLeft = rect.right + 12;
+    const maxLeft = window.innerWidth - bubble.offsetWidth - 12;
+    bubble.style.top = (rect.top + (rect.height / 2) - 20) + 'px'; // Center roughly (viewport-relative)
+    bubble.style.left = Math.max(12, Math.min(desiredLeft, maxLeft)) + 'px';
 
     // Show
     requestAnimationFrame(() => { bubble.style.opacity = '1'; });
@@ -1055,6 +1055,14 @@ Best regards,`;
         // ... mock ...
         resolve(); return;
       }
+
+      // ✅ Save current scroll position (key fix for horizontal drift)
+      const startX = window.scrollX || 0;
+      const startY = window.scrollY || 0;
+
+      // Save scroll behavior to restore later
+      const prevScrollBehavior = document.documentElement.style.scrollBehavior;
+      document.documentElement.style.scrollBehavior = 'auto';
 
       // 1. Hide UI (use visibility instead of display to preserve layout space)
       // display:none triggers Booking.com's sticky sidebar recalculation
@@ -1112,7 +1120,8 @@ Best regards,`;
 
           // STEP B.5: SCROLL INTO VIEW (Critical for captureVisibleTab reliability)
           // Scroll the sidebar to center of viewport so it's fully visible
-          sidebarEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          // Use inline:'nearest' to prevent horizontal drift, behavior:'auto' for deterministic restore
+          sidebarEl.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
         }
 
         // STEP C: Capture (with delay to let scroll settle)
@@ -1136,7 +1145,16 @@ Best regards,`;
                   injectedDiv.remove();
                   injectedDiv = null; // Prevent double-remove
                 }
-                // NOTE: Do NOT call scrollIntoView here - it causes panel position drift
+
+                // ✅ Restore scroll position (key fix for horizontal drift)
+                try {
+                  window.scrollTo({ left: startX, top: startY, behavior: 'auto' });
+                } catch (e) {
+                  window.scrollTo(startX, startY);
+                }
+
+                // Restore scroll behavior
+                document.documentElement.style.scrollBehavior = prevScrollBehavior;
               };
 
               // Safety timeout: ensure cleanup happens even if callback never fires
