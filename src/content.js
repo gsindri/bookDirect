@@ -665,8 +665,8 @@
         if (window.hasBookDirectInjected) return;
         if (!window.BookDirect) return;
 
-        // Check for search results page and trigger prefetch (doesn't block injection)
-        handleSearchResultsPage();
+        // NOTE: Search results prefetch is handled by the immediate page router IIFE
+        // which runs before this hotel-page IIFE and sets window.__bookDirect_isSearchPage
 
         if (handleDetailsPage()) {
             window.hasBookDirectInjected = true;
