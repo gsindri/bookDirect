@@ -435,7 +435,14 @@
         // Final fallback: default to 'us'
         gl = gl ? gl.toLowerCase() : 'us';
 
-        const hl = document.documentElement.lang || 'en';
+        // Fix #4: Extract hl same way as prefetch (URL lang param first)
+        // This ensures ctx key matching between prefetch and hotel page
+        const hl = (
+            params.get('lang') ||
+            document.documentElement.lang ||
+            navigator.language ||
+            ''
+        ).trim();
 
         return {
             hotelName,
@@ -457,140 +464,19 @@
         // Only send if we have hotel name
         if (!itinerary.hotelName) return;
 
-        // Try to find a matching ctxId from session storage (from previous search)
-        // Look for any prefetch key that matches our current dates/currency
-        let ctx = null;
-        try {
-            for (let i = 0; i < sessionStorage.length; i++) {
-                const key = sessionStorage.key(i);
-                if (key.startsWith('bookDirect_prefetch:')) {
-                    // Key format: bookDirect_prefetch:${checkIn}:${checkOut}:${adults}:${currency}:${gl}
-                    const parts = key.replace('bookDirect_prefetch:', '').split(':');
-                    if (parts.length >= 5 &&
-                        parts[0] === itinerary.checkIn &&
-                        parts[1] === itinerary.checkOut) {
-                        ctx = sessionStorage.getItem(key);
-                        console.log('bookDirect: Found matching ctx from session storage:', ctx);
-                        break;
-                    }
-                }
-            }
-        } catch (e) {
-            // Session storage not available
-        }
+        // Note: ctx is now managed by background.js using chrome.storage.session
+        // The old sessionStorage lookup was loose and could select wrong ctxId
+        // Background.js handles ctx lookup based on tabId + itinerary key
 
-        const payload = {
-            ...itinerary,
-            ctx // Include ctx if found
-        };
-
-        console.log('bookDirect: Sending page context', payload);
-        console.log('bookDirect: Dates extracted:', payload.checkIn, '->', payload.checkOut, payload.ctx ? `(ctx: ${payload.ctx})` : '(no ctx)');
+        console.log('bookDirect: Sending page context', itinerary);
+        console.log('bookDirect: Dates extracted:', itinerary.checkIn, '->', itinerary.checkOut);
 
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
             chrome.runtime.sendMessage({
                 type: 'BOOKDIRECT_PAGE_CONTEXT',
-                payload
+                payload: itinerary
             });
         }
-    }
-
-    // --- STRATEGY 1: SEARCH RESULTS (Fixed Position) ---
-    // --- STRATEGY 0: SEARCH RESULTS PAGE (Prefetch context) ---
-    // Detects Booking.com search results pages and triggers context prefetch
-    function handleSearchResultsPage() {
-        // URL pattern: /searchresults.html or /searchresults.<locale>.html
-        const searchResultsPattern = /^\/searchresults(\.[a-z-]+)?\.html$/i;
-        const pathname = window.location.pathname;
-
-        if (!searchResultsPattern.test(pathname)) return false;
-
-        // DOM fallback: check for property-card elements
-        const propertyCards = document.querySelectorAll('[data-testid="property-card"], .sr_property_block, .sr_item');
-        if (propertyCards.length === 0) {
-            console.log('bookDirect: Search results page detected but no property cards found');
-            return false;
-        }
-
-        console.log(`bookDirect: Detected search results page with ${propertyCards.length} property cards`);
-
-        // Extract search params
-        const params = new URLSearchParams(window.location.search);
-
-        // Query/destination
-        const q = params.get('ss') ||
-            params.get('query') ||
-            params.get('dest_id') ||
-            params.get('city') ||
-            document.querySelector('input[name="ss"]')?.value ||
-            '';
-
-        if (!q) {
-            console.log('bookDirect: No search query found, skipping prefetch');
-            return false;
-        }
-
-        // Dates from URL
-        const checkIn = params.get('checkin') || params.get('check_in_date') || '';
-        const checkOut = params.get('checkout') || params.get('check_out_date') || '';
-
-        if (!checkIn || !checkOut) {
-            console.log('bookDirect: Missing dates, skipping prefetch');
-            return false;
-        }
-
-        // Adults  
-        const adultsRaw = params.get('group_adults') || params.get('adults') || '2';
-        const adults = parseInt(adultsRaw, 10) || 2;
-
-        // Currency
-        const currency = params.get('selected_currency') ||
-            params.get('selected_currency_code') ||
-            params.get('currency') ||
-            'USD';
-
-        // Region/language
-        const gl = (params.get('cc1') || 'us').toLowerCase(); // cc1 is country code
-        const hl = navigator.language || 'en-US';
-
-        // Create signature key for storage lookup
-        const signatureKey = `prefetch:${checkIn}:${checkOut}:${adults}:${currency}:${gl}`;
-
-        // Check if we've already prefetched this search (via session storage)
-        const storageKey = `bookDirect_${signatureKey}`;
-        if (sessionStorage.getItem(storageKey)) {
-            console.log('bookDirect: Search already prefetched this session');
-            return true;
-        }
-
-        // Send prefetch request to background
-        console.log('bookDirect: Sending PREFETCH_CTX request', { q, checkIn, checkOut, adults, currency, gl, hl });
-
-        if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
-            chrome.runtime.sendMessage({
-                action: 'PREFETCH_CTX',
-                q,
-                checkIn,
-                checkOut,
-                adults,
-                currency,
-                gl,
-                hl,
-                signatureKey
-            }, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.log('bookDirect: Prefetch error', chrome.runtime.lastError.message);
-                    return;
-                }
-                if (response?.ok && response?.ctxId) {
-                    console.log(`bookDirect: Prefetched context ${response.ctxId} with ${response.count} properties`);
-                    // Store in session storage for quick lookup
-                    sessionStorage.setItem(storageKey, response.ctxId);
-                }
-            });
-        }
-
-        return true; // Handled as search results page
     }
 
     // --- STRATEGY 1: SEARCH PAGE (Floating UI) ---
