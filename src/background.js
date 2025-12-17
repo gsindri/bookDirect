@@ -177,6 +177,9 @@ function markRetriedWithOfficialUrl(tabId, params) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender.tab?.id;
 
+    // Log all incoming messages for debugging
+    console.log('bookDirect: onMessage', message?.type || message?.action, 'from tab', tabId, message);
+
     // Screenshot capture (existing)
     if (message.type === 'ACTION_CAPTURE_VISIBLE_TAB') {
         const targetWindowId = sender.tab ? sender.tab.windowId : null;
@@ -202,15 +205,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // Prefetch search context (from search results page)
-    if (message.action === 'PREFETCH_CTX') {
+    // NOTE: content.js sends { type: "PREFETCH_CTX", payload: { q, checkIn, ... } }
+    if (message.type === 'PREFETCH_CTX') {
+        const payload = message.payload || {};
+        console.log('bookDirect: PREFETCH_CTX payload:', payload);
+
         const prefetchUrl = new URL(`${WORKER_BASE_URL}/prefetchCtx`);
-        prefetchUrl.searchParams.set('q', message.q || '');
-        prefetchUrl.searchParams.set('checkIn', message.checkIn || '');
-        prefetchUrl.searchParams.set('checkOut', message.checkOut || '');
-        prefetchUrl.searchParams.set('adults', String(message.adults || 2));
-        prefetchUrl.searchParams.set('currency', message.currency || 'USD');
-        prefetchUrl.searchParams.set('gl', message.gl || 'us');
-        prefetchUrl.searchParams.set('hl', message.hl || 'en-US');
+        prefetchUrl.searchParams.set('q', payload.q || '');
+        prefetchUrl.searchParams.set('checkIn', payload.checkIn || '');
+        prefetchUrl.searchParams.set('checkOut', payload.checkOut || '');
+        prefetchUrl.searchParams.set('adults', String(payload.adults || 2));
+        prefetchUrl.searchParams.set('currency', payload.currency || 'USD');
+        prefetchUrl.searchParams.set('gl', payload.gl || 'us');
+        prefetchUrl.searchParams.set('hl', payload.hl || 'en-US');
 
         console.log('bookDirect: Calling /prefetchCtx', prefetchUrl.toString());
 

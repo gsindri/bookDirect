@@ -1,5 +1,159 @@
+// =============================================
+// IMMEDIATE PAGE ROUTER - Must run before anything else
+// =============================================
+(function immediatePageRouter() {
+    const log = (...args) => console.log("bookDirect:", ...args);
+
+    function isBookingHost() {
+        return /(^|\.)booking\.com$/i.test(location.hostname);
+    }
+
+    function isSearchResultsPage() {
+        // Handles: /searchresults.html, /searchresults.en-gb.html, etc.
+        return isBookingHost() && /^\/searchresults(\..+)?\.html$/i.test(location.pathname);
+    }
+
+    function pad2(n) {
+        return String(n).padStart(2, "0");
+    }
+
+    function ymd(y, m, d) {
+        if (!y || !m || !d) return "";
+        return `${y}-${pad2(m)}-${pad2(d)}`;
+    }
+
+    function guessGlFromHotelLinks() {
+        // On results pages, hotel cards usually contain links like /hotel/dk/....
+        const a = document.querySelector('a[href*="/hotel/"]');
+        if (!a) return "";
+        const href = a.getAttribute("href") || "";
+        const m = href.match(/\/hotel\/([a-z]{2})\//i);
+        return m ? m[1].toLowerCase() : "";
+    }
+
+    function extractPrefetchParamsFromUrl() {
+        const u = new URL(location.href);
+        const sp = u.searchParams;
+
+        const q =
+            (sp.get("ss") || "").trim() ||
+            (sp.get("ssne_untouched") || "").trim() ||
+            (sp.get("ssne") || "").trim();
+
+        // Booking uses either full ISO or split params
+        let checkIn = sp.get("checkin") || "";
+        let checkOut = sp.get("checkout") || "";
+
+        if (!checkIn) checkIn = ymd(sp.get("checkin_year"), sp.get("checkin_month"), sp.get("checkin_monthday"));
+        if (!checkOut) checkOut = ymd(sp.get("checkout_year"), sp.get("checkout_month"), sp.get("checkout_monthday"));
+
+        const adultsRaw = sp.get("group_adults") || sp.get("adults") || "2";
+        const adults = Math.max(1, Math.min(10, parseInt(adultsRaw, 10) || 2));
+
+        const currency = (sp.get("selected_currency") || sp.get("currency") || "").trim().toUpperCase();
+
+        // Booking commonly uses ?lang=en-us
+        const hl = (sp.get("lang") || document.documentElement.lang || navigator.language || "").trim();
+
+        // Prefer extracting from actual hotel links so it matches hotel page logic
+        const gl = (guessGlFromHotelLinks() || sp.get("gl") || "").trim().toLowerCase() || "us";
+
+        if (!q || !checkIn || !checkOut) return null;
+
+        return { q, checkIn, checkOut, adults, currency, gl, hl };
+    }
+
+    function sendPrefetchMessage(payload) {
+        try {
+            if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
+                log("PREFETCH_CTX: extension context not available");
+                return;
+            }
+            chrome.runtime.sendMessage({ type: "PREFETCH_CTX", payload }, (resp) => {
+                if (chrome.runtime.lastError) {
+                    log("PREFETCH_CTX send failed:", chrome.runtime.lastError.message);
+                    return;
+                }
+                log("PREFETCH_CTX response:", resp);
+                // Store ctxId in sessionStorage for hotel page lookup
+                if (resp?.ok && resp?.ctxId) {
+                    const storageKey = `bookDirect_prefetch:${payload.checkIn}:${payload.checkOut}:${payload.adults}:${payload.currency || 'USD'}:${payload.gl}`;
+                    try {
+                        sessionStorage.setItem(storageKey, resp.ctxId);
+                        log("Stored ctxId in sessionStorage:", storageKey, resp.ctxId);
+                    } catch (e) {
+                        log("Failed to store ctxId:", e);
+                    }
+                }
+            });
+        } catch (e) {
+            log("PREFETCH_CTX exception:", e);
+        }
+    }
+
+    // Debounced runner (Booking changes URL via SPA-ish navigation sometimes)
+    let timer = null;
+    let lastKey = "";
+
+    function schedulePrefetch(reason) {
+        if (!isSearchResultsPage()) return;
+
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            const params = extractPrefetchParamsFromUrl();
+            log("Search results detected:", { reason, href: location.href, params });
+
+            if (!params) {
+                log("Prefetch skipped (missing q/checkIn/checkOut)");
+                return;
+            }
+
+            // Avoid repeated sends for same parameters
+            const key = JSON.stringify(params);
+            if (key === lastKey) return;
+            lastKey = key;
+
+            sendPrefetchMessage(params);
+        }, 500);
+    }
+
+    // ---- Hook initial load + URL changes ----
+    if (isSearchResultsPage()) {
+        log("Search results page detected - initiating prefetch flow");
+        schedulePrefetch("initial");
+
+        // Patch SPA navigation
+        const _push = history.pushState;
+        const _replace = history.replaceState;
+
+        history.pushState = function (...args) {
+            _push.apply(this, args);
+            schedulePrefetch("pushState");
+        };
+        history.replaceState = function (...args) {
+            _replace.apply(this, args);
+            schedulePrefetch("replaceState");
+        };
+
+        window.addEventListener("popstate", () => schedulePrefetch("popstate"));
+
+        // Re-run once results DOM likely exists (so gl extraction can succeed)
+        setTimeout(() => schedulePrefetch("delayed-1s"), 1000);
+        setTimeout(() => schedulePrefetch("delayed-3s"), 3000);
+
+        // IMPORTANT: Do not continue into hotel-page injection logic on results pages.
+        log("Exiting early - search results page does not need hotel UI injection");
+        return;
+    }
+
+    log("Not a search results page, continuing to hotel page logic...");
+})();
+
+// =============================================
+// HOTEL PAGE LOGIC - Only runs if not a search results page
+// =============================================
 (function () {
-    console.log('bookDirect: Content script started');
+    console.log('bookDirect: Content script started (hotel page flow)');
 
     // Global reference to our UI app
     let app = null;
