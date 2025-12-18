@@ -1401,14 +1401,32 @@ Best regards,`;
         }
       }
 
-      // STEP C (MISS): Call API
-      console.log('bookDirect: Cache miss, fetching from API...');
-      const apiUrl = `https://hotelfinder.gsindrih.workers.dev/?query=${encodeURIComponent(_hotelName)}`;
-      const response = await fetch(apiUrl);
+      // STEP C (MISS): Call API via background (avoids CORS)
+      console.log('bookDirect: Cache miss, fetching from API via background...');
 
-      if (!response.ok) return; // Fail silently
+      let data = null;
+      try {
+        data = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({
+            type: 'GET_HOTEL_DETAILS',
+            query: _hotelName
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(response);
+            }
+          });
+        });
+      } catch (e) {
+        console.log('bookDirect: Hotel details fetch failed:', e.message);
+        return; // Fail silently
+      }
 
-      const data = await response.json();
+      if (!data || data.error) {
+        console.log('bookDirect: Hotel details response error:', data?.error);
+        return; // Fail silently
+      }
 
       // Save to cache with timestamp
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {

@@ -358,6 +358,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
+    // Get hotel details from worker (CORS-safe from background)
+    if (message.type === 'GET_HOTEL_DETAILS') {
+        const query = (message.query || '').trim();
+        if (!query) {
+            sendResponse({ error: 'Missing query' });
+            return false;
+        }
+
+        const u = new URL(`${WORKER_BASE_URL}/`);
+        u.searchParams.set('query', query);
+
+        fetch(u.toString())
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => sendResponse(data))
+            .catch(err => {
+                console.error('bookDirect: Hotel details fetch failed:', err);
+                sendResponse({ error: err.message || 'Fetch failed' });
+            });
+
+        return true; // Keep channel open for async
+    }
+
     // Get compare data (called from UI)
     if (message.type === 'GET_COMPARE_DATA') {
         const context = tabId ? tabContexts.get(tabId) : null;
