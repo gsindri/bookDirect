@@ -21,17 +21,22 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         position: relative;
         display: block;
         max-width: 100%; /* Prevent overflow but don't force full width */
+        min-width: 0; /* Key for flex contexts - prevents widening parent */
         margin-top: 10px;
         margin-bottom: 10px;
         contain: layout; /* Isolate layout from parent recalculations */
+        overflow: hidden; /* Prevent content from causing horizontal overflow */
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
       .container {
+        width: 100%;
         max-width: 100%; /* Let content determine width, but cap at parent */
+        min-width: 0; /* Key for flex contexts */
         box-sizing: border-box; 
         border-radius: 4px; /* Flatter for sidebar */
         background: #fff;
         border: 2px solid #003580; /* Distinct border */
+        overflow: hidden; /* Prevent content overflow */
       }
     ` : `
       :host, .host-wrapper {
