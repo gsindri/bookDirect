@@ -305,9 +305,10 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         button:hover, .btn-primary:hover { transform: none; }
       }
 
-      /* 5. Secondary Button: Premium styling */
       .btn-outline, .btn-secondary {
         width: 100%;
+        max-width: 100%;
+        min-width: 0;
         height: 50px;
         padding: 0 16px;
         display: flex;
@@ -326,11 +327,16 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         cursor: pointer;
         margin-top: 12px;
         text-decoration: none;
+        box-sizing: border-box;
+        overflow: hidden;
         transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
       }
 
       .btn-outline span, .btn-secondary span {
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
         line-height: 1;
         font-size: 13px;
       }
@@ -400,6 +406,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       /* Phone link styling */
       .phone-link {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         justify-content: center;
         gap: 8px;
@@ -409,6 +416,9 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         color: rgba(0, 53, 128, 0.8);
         text-decoration: none;
         transition: all 0.2s ease;
+        min-width: 0;
+        max-width: 100%;
+        word-break: break-word;
       }
 
       .phone-link:hover {
