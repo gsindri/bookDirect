@@ -950,8 +950,9 @@ Best regards,`;
       if (cell) {
         cell.style.transition = 'background-color 0.2s';
         cell.style.backgroundColor = '#ffebeb'; // The pinkish row highlight
-        // Also style the select itself slightly to match
-        sel.style.border = '1px solid #d4111e';
+        // Use outline instead of border - doesn't affect layout width
+        sel.style.outline = '2px solid #d4111e';
+        sel.style.outlineOffset = '2px';
 
         highlightedElements.push({ cell, sel });
       }
@@ -975,7 +976,8 @@ Best regards,`;
         pointer-events: none;
         opacity: 0;
         transition: opacity 0.3s;
-        min-width: 180px;
+        max-width: min(240px, calc(100vw - 24px));
+        min-width: 0;
     `;
     bubble.innerHTML = '<span>Select one or more options you want to book</span>';
 
@@ -1013,15 +1015,25 @@ Best regards,`;
     // Position it using FIXED positioning (viewport-relative, no scroll offsets)
     const rect = firstSelect.getBoundingClientRect();
 
-    // Position: To the RIGHT of the select, vertically centered
-    // Clamp horizontally to prevent overflow beyond viewport
-    const desiredLeft = rect.right + 12;
-    const maxLeft = window.innerWidth - bubble.offsetWidth - 12;
-    bubble.style.top = (rect.top + (rect.height / 2) - 20) + 'px'; // Center roughly (viewport-relative)
-    bubble.style.left = Math.max(12, Math.min(desiredLeft, maxLeft)) + 'px';
+    // Temporarily place off-screen so we can measure width/height
+    bubble.style.left = '0px';
+    bubble.style.top = '0px';
 
-    // Show
-    requestAnimationFrame(() => { bubble.style.opacity = '1'; });
+    // Use rAF to measure after browser has computed dimensions
+    requestAnimationFrame(() => {
+      // Clamp vertically and horizontally to prevent overflow beyond viewport
+      const desiredTop = rect.top + (rect.height / 2) - 20;
+      const maxTop = window.innerHeight - bubble.offsetHeight - 12;
+      const top = Math.max(12, Math.min(desiredTop, maxTop));
+
+      const desiredLeft = rect.right + 12;
+      const maxLeft = window.innerWidth - bubble.offsetWidth - 12;
+      const left = Math.max(12, Math.min(desiredLeft, maxLeft));
+
+      bubble.style.top = `${top}px`;
+      bubble.style.left = `${left}px`;
+      bubble.style.opacity = '1';
+    });
 
     // CLEANUP FUNCTION
     const clearHighlights = () => {
@@ -1030,7 +1042,8 @@ Best regards,`;
 
       highlightedElements.forEach(({ cell, sel }) => {
         cell.style.backgroundColor = '';
-        sel.style.border = '';
+        sel.style.outline = '';
+        sel.style.outlineOffset = '';
       });
     };
 
