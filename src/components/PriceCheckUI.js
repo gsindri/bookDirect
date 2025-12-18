@@ -18,7 +18,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
   const baseStyle = isSidebar ? `
       :host, .host-wrapper {
-        position: relative;
+        position: sticky;
+        top: 10px; /* Become sticky when reaching 10px from top of viewport */
         display: block;
         max-width: 100%; /* Prevent overflow but don't force full width */
         min-width: 0; /* Key for flex contexts - prevents widening parent */
@@ -27,6 +28,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         contain: layout; /* Isolate layout from parent recalculations */
         overflow: hidden; /* Prevent content from causing horizontal overflow */
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        z-index: 100; /* Ensure it stays on top when sticky */
       }
       .container {
         width: 100%;

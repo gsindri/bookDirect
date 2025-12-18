@@ -650,6 +650,12 @@
                 // ALSO Update Details
                 const currentDetails = getRoomDetails();
                 if (app.updateDetails) app.updateDetails(currentDetails);
+
+                // ✅ SAFETY: Reset horizontal scroll if page isn't actually wider than viewport
+                // This prevents the "gap" from appearing after room selection or other DOM changes
+                if (window.scrollX && document.documentElement.scrollWidth <= window.innerWidth + 1) {
+                    window.scrollTo({ left: 0, top: window.scrollY, behavior: 'auto' });
+                }
             });
             observer.observe(scope, { subtree: true, childList: true, characterData: true, attributes: true });
 
