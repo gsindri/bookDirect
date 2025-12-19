@@ -672,6 +672,12 @@
             window.hasBookDirectInjected = true;
             // Send page context to background for price comparison
             sendPageContext();
+
+            // ✅ NUCLEAR FIX: Prevent horizontal scroll drift caused by Booking.com's layout quirk
+            // (Booking's carousel/grid elements can be a few pixels wider than viewport)
+            document.documentElement.style.overflowX = 'hidden';
+            document.body.style.overflowX = 'hidden';
+
             return;
         }
 
