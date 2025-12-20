@@ -23,6 +23,7 @@
                 "*://*.booking.com/*"
             ],
             "js": [
+                "src/components/OverflowDiagnostics.js",
                 "src/components/PriceCheckUI.js",
                 "src/content.js"
             ]

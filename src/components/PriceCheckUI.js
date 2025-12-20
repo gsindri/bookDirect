@@ -944,15 +944,43 @@ Best regards,`;
     const selects = document.querySelectorAll('.hprt-nos-select, .hprt-table select');
     if (!selects.length) return false;
 
-    // 1. Scroll to table (gentler)
     const firstSelect = selects[0];
-    firstSelect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-    // 2. Highlight the CELL/COLUMN (parent td)
+    // 1. Capture scrollLeft of all horizontally scrollable ancestors BEFORE any scrolling
+    // This prevents the "columns separated" / gap effect caused by horizontal scroll drift
+    const scrollableAncestors = [];
+    for (let p = firstSelect; p && p !== document.documentElement; p = p.parentElement) {
+      const cs = getComputedStyle(p);
+      const ox = cs.overflowX;
+      if ((ox === 'auto' || ox === 'scroll') && p.scrollWidth > p.clientWidth + 1) {
+        scrollableAncestors.push({ el: p, scrollLeft: p.scrollLeft });
+      }
+    }
+
+    // 2. Scroll to the TABLE (block-level anchor), not the select
+    // This avoids triggering horizontal scroll to "reveal" the select
+    const scrollAnchor =
+      firstSelect.closest('table') ||
+      firstSelect.closest('[data-testid]') ||
+      firstSelect.closest('section') ||
+      firstSelect;
+
+    scrollAnchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+
+    // 3. Restore horizontal scrollLeft after browser finishes scroll
+    // Use rAF to run after the browser's scroll step
+    requestAnimationFrame(() => {
+      scrollableAncestors.forEach(({ el, scrollLeft }) => {
+        if (el.scrollLeft !== scrollLeft) {
+          el.scrollLeft = scrollLeft;
+        }
+      });
+    });
+
+    // 4. Highlight the CELL/COLUMN (parent td)
     // Store references for cleanup
     const highlightedElements = [];
 
-    // 2. Highlight the CELL/COLUMN (parent td)
     selects.forEach(sel => {
       // Traverse to the table cell (td)
       const cell = sel.closest('td') || sel.parentNode;
@@ -1077,186 +1105,197 @@ Best regards,`;
   }
 
   function captureAndCopyScreenshot() {
-    // ... (mock mode logic same)
     return new Promise((resolve, reject) => {
       if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
-        // ... mock ...
         resolve(); return;
       }
 
-      // ✅ Save current scroll position (key fix for horizontal drift)
+      // ========================================
+      // STATE VARIABLES (declared upfront for guaranteed cleanup access)
+      // ========================================
       const startX = window.scrollX || 0;
       const startY = window.scrollY || 0;
-
-      // Save scroll behavior to restore later
       const prevScrollBehavior = document.documentElement.style.scrollBehavior;
-      document.documentElement.style.scrollBehavior = 'auto';
+      let injectedDiv = null;
+      let cleanupCalled = false;
 
-      // 1. Hide UI (use visibility instead of display to preserve layout space)
-      // display:none triggers Booking.com's sticky sidebar recalculation
-      container.style.visibility = 'hidden';
-      container.style.opacity = '0';
-      container.style.pointerEvents = 'none';
+      // ========================================
+      // CLEANUP FUNCTION (defined upfront, always callable)
+      // ========================================
+      const doCleanup = () => {
+        if (cleanupCalled) return; // Prevent double-cleanup
+        cleanupCalled = true;
 
-      // 2. Wait
-      setTimeout(() => {
-        // STEP A: Scrape
-        const dateEl = document.querySelector('[data-testid="searchbox-dates-container"]') ||
-          document.querySelector('.sb-date-field__display');
+        // Restore container visibility
+        try {
+          container.style.visibility = '';
+          container.style.opacity = '';
+          container.style.pointerEvents = '';
+        } catch (e) { /* container might be gone */ }
 
-        let checkIn = 'Check-in Date';
-        let checkOut = 'Check-out Date';
-
-        if (dateEl) {
-          const raw = dateEl.innerText.replace(/\n/g, ' ');
-          // Split by em-dash or dash
-          const parts = raw.split(/—|-/);
-          if (parts.length >= 2) {
-            checkIn = parts[0].trim();
-            checkOut = parts[1].trim();
-          } else {
-            checkIn = raw;
-            checkOut = '';
-          }
+        // Remove injected date grid
+        if (injectedDiv) {
+          try { injectedDiv.remove(); } catch (e) { }
+          injectedDiv = null;
         }
 
-        // Sidebar Target
-        const reserveBtn = document.querySelector('.js-reservation-button') ||
-          document.querySelector('button[type="submit"].hprt-reservation-cta__book');
-        let sidebarEl = null;
-
-        if (reserveBtn) {
-          sidebarEl = reserveBtn.closest('.hprt-block') ||
-            reserveBtn.closest('aside') ||
-            reserveBtn.closest('.hprt-reservation-cta') ||
-            reserveBtn.parentNode.parentNode;
-        }
-        if (!sidebarEl) {
-          sidebarEl = document.querySelector('.hprt-reservation-cta') ||
-            document.querySelector('.hprt-price-block') ||
-            document.body;
+        // Restore scroll position
+        try {
+          window.scrollTo({ left: startX, top: startY, behavior: 'auto' });
+        } catch (e) {
+          try { window.scrollTo(startX, startY); } catch (e2) { }
         }
 
-        let injectedDiv = null;
-        let rect = null;
+        // Restore scroll behavior
+        try {
+          document.documentElement.style.scrollBehavior = prevScrollBehavior;
+        } catch (e) { }
 
+        // Optional: nudge Booking to recompute sticky positions
+        try {
+          requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+        } catch (e) { }
+      };
 
-        if (sidebarEl) {
-          // STEP B: Inject Visual Grid
-          injectedDiv = createDateGrid(checkIn, checkOut, _hotelName);
-          sidebarEl.prepend(injectedDiv);
+      // ========================================
+      // MAIN CAPTURE LOGIC (wrapped in try/catch)
+      // ========================================
+      try {
+        document.documentElement.style.scrollBehavior = 'auto';
 
-          // STEP B.5: SCROLL INTO VIEW (Critical for captureVisibleTab reliability)
-          // Scroll the sidebar to center of viewport so it's fully visible
-          // Use inline:'nearest' to prevent horizontal drift, behavior:'auto' for deterministic restore
-          sidebarEl.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
-        }
+        // 1. Hide our UI (use visibility to preserve layout space)
+        container.style.visibility = 'hidden';
+        container.style.opacity = '0';
+        container.style.pointerEvents = 'none';
 
-        // STEP C: Capture (with delay to let scroll settle)
-        // Wait 500ms for smooth scroll to complete before measuring/capturing
+        // 2. Wait a tick, then proceed
         setTimeout(() => {
-          // Re-measure after scroll
-          if (sidebarEl) {
-            rect = sidebarEl.getBoundingClientRect();
-          }
+          try {
+            // STEP A: Scrape dates
+            const dateEl = document.querySelector('[data-testid="searchbox-dates-container"]') ||
+              document.querySelector('.sb-date-field__display');
 
-          // FIX: Yield to browser to ensure the injected div is painted before capturing
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              // Cleanup function to restore UI state
-              const doCleanup = () => {
-                // Restore visibility (matches the hide method above)
-                container.style.visibility = '';
-                container.style.opacity = '';
-                container.style.pointerEvents = '';
-                if (injectedDiv) {
-                  injectedDiv.remove();
-                  injectedDiv = null; // Prevent double-remove
-                }
+            let checkIn = 'Check-in Date';
+            let checkOut = 'Check-out Date';
 
-                // ✅ Restore scroll position (key fix for horizontal drift)
-                try {
-                  window.scrollTo({ left: startX, top: startY, behavior: 'auto' });
-                } catch (e) {
-                  window.scrollTo(startX, startY);
-                }
-
-                // Restore scroll behavior
-                document.documentElement.style.scrollBehavior = prevScrollBehavior;
-              };
-
-              // Safety timeout: ensure cleanup happens even if callback never fires
-              // (happens when extension context is invalidated)
-              const safetyTimeout = setTimeout(() => {
-                console.warn('bookDirect: Screenshot safety timeout triggered - forcing cleanup');
-                doCleanup();
-                reject(new Error('Screenshot timed out'));
-              }, 5000);
-
-              // Check if extension context is still valid
-              try {
-                if (!chrome.runtime?.id) {
-                  clearTimeout(safetyTimeout);
-                  doCleanup();
-                  reject(new Error('Extension context invalidated'));
-                  return;
-                }
-              } catch (e) {
-                clearTimeout(safetyTimeout);
-                doCleanup();
-                reject(new Error('Extension context check failed'));
-                return;
+            if (dateEl) {
+              const raw = dateEl.innerText.replace(/\n/g, ' ');
+              const parts = raw.split(/—|-/);
+              if (parts.length >= 2) {
+                checkIn = parts[0].trim();
+                checkOut = parts[1].trim();
+              } else {
+                checkIn = raw;
+                checkOut = '';
               }
+            }
 
-              chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
-                // Clear safety timeout - callback fired normally
-                clearTimeout(safetyTimeout);
+            // STEP B: Find sidebar
+            const reserveBtn = document.querySelector('.js-reservation-button') ||
+              document.querySelector('button[type="submit"].hprt-reservation-cta__book');
+            let sidebarEl = null;
 
-                // STEP D: Cleanup immediately (Restore UI & Remove Injection)
+            if (reserveBtn) {
+              sidebarEl = reserveBtn.closest('.hprt-block') ||
+                reserveBtn.closest('aside') ||
+                reserveBtn.closest('.hprt-reservation-cta') ||
+                reserveBtn.parentNode.parentNode;
+            }
+            if (!sidebarEl) {
+              sidebarEl = document.querySelector('.hprt-reservation-cta') ||
+                document.querySelector('.hprt-price-block') ||
+                document.body;
+            }
+
+            // STEP C: Inject date grid
+            if (sidebarEl) {
+              injectedDiv = createDateGrid(checkIn, checkOut, _hotelName);
+              sidebarEl.prepend(injectedDiv);
+              sidebarEl.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+            }
+
+            // STEP D: Wait for scroll, then capture
+            setTimeout(() => {
+              try {
+                const rect = sidebarEl ? sidebarEl.getBoundingClientRect() : null;
+
+                requestAnimationFrame(() => {
+                  requestAnimationFrame(() => {
+                    // Safety timeout
+                    const safetyTimeout = setTimeout(() => {
+                      console.warn('bookDirect: Screenshot safety timeout - forcing cleanup');
+                      doCleanup();
+                      reject(new Error('Screenshot timed out'));
+                    }, 5000);
+
+                    // Check extension context
+                    try {
+                      if (!chrome.runtime?.id) {
+                        clearTimeout(safetyTimeout);
+                        doCleanup();
+                        reject(new Error('Extension context invalidated'));
+                        return;
+                      }
+                    } catch (e) {
+                      clearTimeout(safetyTimeout);
+                      doCleanup();
+                      reject(new Error('Extension context check failed'));
+                      return;
+                    }
+
+                    chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
+                      clearTimeout(safetyTimeout);
+                      doCleanup(); // Always cleanup after capture attempt
+
+                      if (chrome.runtime.lastError || !response || !response.success) {
+                        reject(chrome.runtime.lastError || response?.error);
+                        return;
+                      }
+
+                      try {
+                        const res = await fetch(response.dataUrl);
+                        const blob = await res.blob();
+                        const imageBitmap = await createImageBitmap(blob);
+
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        const dpr = window.devicePixelRatio || 1;
+
+                        if (rect && rect.width > 0 && rect.height > 0) {
+                          canvas.width = rect.width * dpr;
+                          canvas.height = rect.height * dpr;
+                          ctx.drawImage(imageBitmap,
+                            rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr,
+                            0, 0, canvas.width, canvas.height
+                          );
+                          const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+                          const item = new ClipboardItem({ 'image/png': croppedBlob });
+                          await navigator.clipboard.write([item]);
+                        } else {
+                          const item = new ClipboardItem({ [blob.type]: blob });
+                          await navigator.clipboard.write([item]);
+                        }
+                        resolve();
+                      } catch (err) {
+                        reject(err);
+                      }
+                    });
+                  });
+                });
+              } catch (e) {
                 doCleanup();
-
-                if (chrome.runtime.lastError || !response || !response.success) {
-                  reject(chrome.runtime.lastError || response?.error);
-                  return;
-                }
-
-                try {
-                  const res = await fetch(response.dataUrl);
-                  const blob = await res.blob();
-                  const imageBitmap = await createImageBitmap(blob);
-
-                  // Canvas for cropping
-                  const canvas = document.createElement('canvas');
-                  const ctx = canvas.getContext('2d');
-
-                  // Handle DPR
-                  const dpr = window.devicePixelRatio || 1;
-
-                  // If we successfully identified a sidebar area to crop
-                  if (rect && rect.width > 0 && rect.height > 0) {
-                    canvas.width = rect.width * dpr;
-                    canvas.height = rect.height * dpr;
-
-                    ctx.drawImage(imageBitmap,
-                      rect.left * dpr, rect.top * dpr, rect.width * dpr, rect.height * dpr, // Source
-                      0, 0, canvas.width, canvas.height // Dest
-                    );
-
-                    const croppedBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-                    const item = new ClipboardItem({ 'image/png': croppedBlob });
-                    await navigator.clipboard.write([item]);
-                  } else {
-                    // Fallback: copy full image if no rect
-                    const item = new ClipboardItem({ [blob.type]: blob });
-                    await navigator.clipboard.write([item]);
-                  }
-                  resolve();
-                } catch (err) { reject(err); }
-              });
-            });
-          });
-        }, 500); // Wait 500ms for smooth scroll to settle
-      }, 50); // Initial delay before scroll
+                reject(e);
+              }
+            }, 500);
+          } catch (e) {
+            doCleanup();
+            reject(e);
+          }
+        }, 50);
+      } catch (e) {
+        doCleanup();
+        reject(e);
+      }
     });
   }
 

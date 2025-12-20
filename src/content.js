@@ -574,10 +574,10 @@
         if (!app && window.BookDirect) {
             app = window.BookDirect.createUI(hotelName, initialPrice, true);
 
-            // Injection Point: We still want to be near the button
-            // If scope is big, find the button wrapper again to inject "above" it
+            // Injection Point: Insert just before the reserve button
+            // Avoid inserting as firstElementChild - that can break Booking's :first-child CSS rules
             const injectionTarget = button.parentElement;
-            injectionTarget.insertBefore(app, injectionTarget.firstElementChild);
+            injectionTarget.insertBefore(app, button);
         } else if (app && app.updatePrice) {
             app.updatePrice(initialPrice);
         }
@@ -677,6 +677,13 @@
             // (Booking's carousel/grid elements can be a few pixels wider than viewport)
             document.documentElement.style.overflowX = 'hidden';
             document.body.style.overflowX = 'hidden';
+
+            // 🔍 OVERFLOW DIAGNOSTICS: Hook room select and scrollX watcher for debugging
+            // Filter console by [bookDirect][overflow] to see metrics and offender elements
+            if (window.bookDirectOverflowDiagnostics) {
+                window.bookDirectOverflowDiagnostics.hookRoomSelect();
+                window.bookDirectOverflowDiagnostics.hookScrollXWatcher();
+            }
 
             return;
         }
