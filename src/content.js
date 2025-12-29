@@ -77,7 +77,7 @@
                 log("PREFETCH_CTX response:", resp);
                 // Store ctxId in sessionStorage for hotel page lookup
                 if (resp?.ok && resp?.ctxId) {
-                    const storageKey = `bookDirect_prefetch:${payload.checkIn}:${payload.checkOut}:${payload.adults}:${payload.currency || 'USD'}:${payload.gl}`;
+                    const storageKey = `bookDirect_prefetch:${payload.q}:${payload.checkIn}:${payload.checkOut}:${payload.adults}:${payload.currency || 'USD'}:${payload.gl}:${payload.hl || ''}`;
                     try {
                         sessionStorage.setItem(storageKey, resp.ctxId);
                         log("Stored ctxId in sessionStorage:", storageKey, resp.ctxId);
@@ -155,6 +155,12 @@
 // HOTEL PAGE LOGIC - Only runs if not a search results page
 // =============================================
 (function () {
+    console.log('[bookDirect][IIFE] Hotel page IIFE starting. Current state:', {
+        isSearchPage: window.__bookDirect_isSearchPage,
+        hasBookDirectInjected: window.hasBookDirectInjected,
+        BookDirectExists: !!window.BookDirect
+    });
+
     // Guard: don't run hotel-page logic on search results pages
     if (window.__bookDirect_isSearchPage) {
         console.log('bookDirect: Skipping hotel page flow (on search results page)');
@@ -165,6 +171,980 @@
 
     // Global reference to our UI app
     let app = null;
+    let reserveButton = null; // Current best visible reserve button (anchor)
+
+    // ========================================
+    // STABLE DOCK SLOT (prevents random sizing from different containers)
+    // ========================================
+    let dockScope = null;     // The container we're docked into
+    let dockSlot = null;      // The persistent slot element
+    const DOCK_SLOT_ID = 'bd-dock-slot';
+
+    // ========================================
+    // PORTAL DOCKING: "ghost" placeholder + floating UI positioned over it
+    // ========================================
+    const DOCK_GHOST_ID = 'bd-dock-ghost';
+    let dockGhost = null;
+    let ghostRO = null;
+
+    // ========================================
+    // PLACEMENT STATE MACHINE (stable dock/float with hysteresis)
+    // ========================================
+    const PLACEMENT = {
+        mode: null,            // 'button' | 'rail' | 'overlay'
+        pendingMode: null,     // candidate mode waiting to commit
+        pendingSince: 0,
+        lastSwitchAt: 0,
+        animating: false,
+        lastDockLeft: null,    // for keeping float aligned to dock position
+        lastDockWidth: null,   // cached dock zone width for portal positioning
+    };
+
+    const SWITCH_DWELL_MS = 120;       // require desired mode to persist (snappier)
+    const SWITCH_COOLDOWN_MS = 350;    // minimum time between commits (snappier)
+    const EXIT_PADDING_PX = 16;        // dock -> float threshold
+    const ENTER_PADDING_PX = 80;       // float -> dock threshold (hysteresis)
+    const ANCHOR_STICKY_MARGIN = 1200; // keep current anchor if close to best
+
+    // ========================================
+    // LAYOUT REPAIR SYSTEM (fixes gap after refresh/scroll)
+    // ========================================
+    let didFirstScrollRepair = false;
+    let lastRepairAt = 0;
+    let roomsXScroller = null;
+    let roomsXScrollerStart = 0;
+    let didHiddenRedock = false;
+
+    /**
+     * Find a horizontal scroller element (often causes "gap" when it drifts)
+     */
+    function findXScroller(startEl) {
+        for (let el = startEl; el && el !== document.documentElement; el = el.parentElement) {
+            const cs = getComputedStyle(el);
+            const ox = cs.overflowX;
+            if ((ox === 'auto' || ox === 'scroll') && el.scrollWidth > el.clientWidth + 2) {
+                return el;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Repair Booking's layout by locking scrollLeft and dispatching resize
+     */
+    function repairBookingLayout(reason) {
+        if (!app) return;
+
+        const now = performance.now();
+        // Don't spam this
+        if (now - lastRepairAt < 400) return;
+        lastRepairAt = now;
+
+        console.log(`[bookDirect][repair] Running layout repair: ${reason}`);
+
+        // 1) Kill "room table gap" caused by scrollLeft drift (desktop only)
+        if (roomsXScroller && window.innerWidth >= 1024) {
+            const drift = roomsXScroller.scrollLeft - roomsXScrollerStart;
+            if (Math.abs(drift) > 0.5) {
+                roomsXScroller.scrollLeft = roomsXScrollerStart;
+                console.log(`[bookDirect][repair] Reset scrollLeft drift: ${drift}px`);
+            }
+        }
+
+        // 2) Force Booking to re-measure sticky widths/offsets
+        requestAnimationFrame(() => {
+            document.body.getBoundingClientRect(); // force reflow read
+            window.dispatchEvent(new Event('resize'));
+        });
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
+    }
+
+    /**
+     * Initialize the repair system after injection
+     */
+    function initRepairSystem() {
+        // Find the room table / availability region and its x-scroller
+        const table =
+            document.querySelector('.hprt-table') ||
+            document.querySelector('#hprt-table') ||
+            reserveButton?.closest('table') ||
+            null;
+
+        roomsXScroller = findXScroller(table || reserveButton);
+        roomsXScrollerStart = roomsXScroller ? roomsXScroller.scrollLeft : 0;
+
+        // Repair shortly after injection/hydration settles
+        setTimeout(() => repairBookingLayout('post-inject-0'), 0);
+        setTimeout(() => repairBookingLayout('post-inject-500'), 500);
+        setTimeout(() => repairBookingLayout('post-inject-1500'), 1500);
+    }
+
+    /**
+     * Hidden redock nudge - mimics "float then dock fixes it" behavior
+     */
+    function hiddenRedockNudge() {
+        if (!app || !reserveButton || didHiddenRedock) return;
+        didHiddenRedock = true;
+
+        const prevOpacity = app.style.opacity;
+        app.style.opacity = '0';
+
+        // Move out and back in on consecutive frames
+        const floatHost = getOrCreateFloatingHost();
+        floatHost.appendChild(app);
+
+        requestAnimationFrame(() => {
+            // Re-place using the 3-tier system
+            placeUI(app, { animate: false, force: true });
+            app.style.opacity = prevOpacity || '1';
+            repairBookingLayout('hidden-redock');
+        });
+    }
+
+    // ========================================
+    // ROOM SELECT STABILIZER (prevents gap after room dropdown change)
+    // ========================================
+    let __bdRoomSelectStabilizerArmed = false;
+
+    function armRoomSelectStabilizer() {
+        if (__bdRoomSelectStabilizerArmed) return;
+        __bdRoomSelectStabilizerArmed = true;
+
+        const SNAPSHOTS = new WeakMap(); // HTMLSelectElement -> snapshot[]
+        const ROOM_SELECT_SELECTOR = '.hprt-nos-select, .hprt-table select';
+
+        function isRoomSelect(el) {
+            return el && el.matches && el.matches(ROOM_SELECT_SELECTOR);
+        }
+
+        function captureScrollableAncestors(fromEl) {
+            const snap = [];
+
+            // Capture scrollingElement too, just in case
+            const se = document.scrollingElement;
+            if (se && se.scrollWidth > se.clientWidth + 1) {
+                snap.push({ el: se, scrollLeft: se.scrollLeft });
+            }
+
+            for (let p = fromEl; p && p !== document.documentElement; p = p.parentElement) {
+                const cs = getComputedStyle(p);
+                const ox = cs.overflowX;
+
+                // Only elements that can actually scroll horizontally
+                const canScroll = (ox === 'auto' || ox === 'scroll');
+                if (!canScroll) continue;
+
+                if (p.scrollWidth > p.clientWidth + 1) {
+                    snap.push({ el: p, scrollLeft: p.scrollLeft });
+                }
+            }
+            return snap;
+        }
+
+        function restoreSnapshot(snapshot) {
+            if (!snapshot || !snapshot.length) return;
+
+            // Root horizontal reset
+            try { document.documentElement.scrollLeft = 0; } catch (_) { }
+            try { document.body.scrollLeft = 0; } catch (_) { }
+
+            snapshot.forEach(({ el, scrollLeft }) => {
+                try {
+                    if (el && typeof el.scrollLeft === 'number' && el.scrollLeft !== scrollLeft) {
+                        el.scrollLeft = scrollLeft;
+                    }
+                } catch (_) { }
+            });
+        }
+
+        function nudgeLayout(reason) {
+            // Force style/layout flush
+            try { void document.documentElement.offsetWidth; } catch (_) { }
+
+            // Fire resize events (Booking listens to these)
+            try { window.dispatchEvent(new Event('resize')); } catch (_) { }
+            requestAnimationFrame(() => {
+                try { window.dispatchEvent(new Event('resize')); } catch (_) { }
+            });
+        }
+
+        function scheduleRepair(selectEl, reason) {
+            const snapshot =
+                (selectEl && SNAPSHOTS.get(selectEl)) ||
+                (selectEl ? captureScrollableAncestors(selectEl) : null);
+
+            const run = (label) => {
+                restoreSnapshot(snapshot);
+                nudgeLayout(`${reason}:${label}`);
+
+                // Re-check placement without forcing a mode switch
+                try { checkPlacementThrottled(); } catch (_) { }
+            };
+
+            // Hit several timings (Booking updates across multiple ticks)
+            run('immediate');
+            requestAnimationFrame(() => run('rAF1'));
+            requestAnimationFrame(() => requestAnimationFrame(() => run('rAF2')));
+            setTimeout(() => run('t150'), 150);
+            setTimeout(() => run('t400'), 400);
+            setTimeout(() => run('t900'), 900);
+
+            if (selectEl) SNAPSHOTS.delete(selectEl);
+        }
+
+        // Capture scrollLeft BEFORE Booking mutates anything
+        document.addEventListener('pointerdown', (e) => {
+            const t = e.target;
+            const sel = t && t.closest ? t.closest('select') : null;
+            if (!isRoomSelect(sel)) return;
+
+            SNAPSHOTS.set(sel, captureScrollableAncestors(sel));
+        }, true);
+
+        // Repair AFTER selection
+        document.addEventListener('change', (e) => {
+            const sel = e.target;
+            if (!isRoomSelect(sel)) return;
+
+            scheduleRepair(sel, 'room-select-change');
+        }, true);
+
+        console.log('[bookDirect][stabilizer] Armed room select stabilizer');
+    }
+
+    // ========================================
+    // PORTAL DOCKING HELPERS
+    // ========================================
+
+    function getOrCreateDockGhost() {
+        if (dockGhost && dockGhost.isConnected) return dockGhost;
+
+        let g = document.getElementById(DOCK_GHOST_ID);
+        if (!g) {
+            g = document.createElement('div');
+            g.id = DOCK_GHOST_ID;
+            g.style.cssText = `
+                display: block;
+                width: 100%;
+                max-width: 100%;
+                min-width: 0;
+                box-sizing: border-box;
+                align-self: stretch;
+                justify-self: stretch;
+                height: 0px;
+                margin: 0;
+                padding: 0;
+                pointer-events: none;
+            `;
+        }
+        dockGhost = g;
+        return g;
+    }
+
+    function syncGhostHeight(uiRoot) {
+        const g = dockGhost;
+        if (!g || !g.isConnected || !uiRoot) return;
+
+        // When floating overlay, collapse placeholder
+        if (PLACEMENT.mode === 'overlay') {
+            g.style.height = '0px';
+            return;
+        }
+
+        const r = uiRoot.getBoundingClientRect();
+        const cs = getComputedStyle(uiRoot);
+        const mt = parseFloat(cs.marginTop) || 0;
+        const mb = parseFloat(cs.marginBottom) || 0;
+
+        const h = Math.max(0, Math.round(r.height + mt + mb));
+        g.style.height = `${h}px`;
+    }
+
+    function ensureGhostResizeObserver(uiRoot) {
+        if (ghostRO || !uiRoot) return;
+        ghostRO = new ResizeObserver(() => syncGhostHeight(uiRoot));
+        ghostRO.observe(uiRoot);
+    }
+
+    // Host positioning: overlay (bottom-right, highest z-index)
+    function applyHostOverlay(host) {
+        if (!host) return;
+        host.style.position = 'fixed';
+        host.style.right = '16px';
+        host.style.bottom = '16px';
+        host.style.left = 'auto';
+        host.style.top = 'auto';
+        host.style.width = '320px';
+        host.style.maxWidth = 'calc(100vw - 32px)';
+        host.style.maxHeight = 'calc(100vh - 32px)';
+        host.style.overflow = 'auto';
+        host.style.zIndex = '2147483647'; // Max z-index for overlay
+        host.style.clipPath = 'none';   // Critical: remove dock clipping
+    }
+
+    // Host positioning: docked (positioned over ghost placeholder)
+    // Uses ghost rect as single source of truth - no min-width clamp
+    function applyHostDocked(host, ghostEl) {
+        if (!host || !ghostEl) return;
+
+        const r = ghostEl.getBoundingClientRect();
+
+        // Use ghost as the single source of truth
+        let left = r.left;
+        let top = r.top;
+        let width = r.width;
+
+        // Safety clamps (don't let it go offscreen)
+        width = Math.max(1, Math.min(width, window.innerWidth));
+        left = Math.max(0, Math.min(left, window.innerWidth - width));
+
+        // Booking's sticky header is typically 48-64px tall
+        const HEADER_HEIGHT = 64;
+
+        host.style.position = 'fixed';
+        host.style.top = `${top}px`;
+        host.style.left = `${left}px`;
+        host.style.width = `${width}px`;
+
+        // Clear overlay anchors so they don't fight dock positioning
+        host.style.right = 'auto';
+        host.style.bottom = 'auto';
+
+        // Don't constrain docked mode
+        host.style.maxWidth = 'none';
+        host.style.maxHeight = 'none';
+        host.style.overflow = 'visible';
+        host.style.zIndex = '2147483647'; // High z-index for clickability
+
+        // Clip any part that would appear above the header
+        // This creates a "window" that starts at HEADER_HEIGHT from the viewport top
+        const clipTop = Math.max(0, HEADER_HEIGHT - top);
+        if (clipTop > 0) {
+            host.style.clipPath = `inset(${clipTop}px 0 0 0)`;
+        } else {
+            host.style.clipPath = 'none';
+        }
+    }
+
+    // ========================================
+    // DOCK/FLOAT PLACEMENT SYSTEM
+    // ========================================
+
+    /**
+     * Get all reserve buttons from the page (Booking may have multiple)
+     */
+    function getAllReserveButtons() {
+        const selectors = [
+            '.js-reservation-button',
+            'button[type="submit"].hprt-reservation-cta__book',
+            '.hprt-reservation-cta button[type="submit"]',
+            'button.bui-button--primary[type="submit"]'
+        ];
+
+        const set = new Set();
+        for (const sel of selectors) {
+            document.querySelectorAll(sel).forEach(el => set.add(el));
+        }
+        return [...set];
+    }
+
+    /**
+     * Score a reserve button based on visibility, position, container scope, and usability
+     * Higher score = better candidate for docking
+     */
+    function scoreReserveButton(btn) {
+        if (!btn || !btn.isConnected) return -Infinity;
+
+        const cs = getComputedStyle(btn);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return -Infinity;
+        if (btn.getClientRects().length === 0) return -Infinity;
+
+        const r = btn.getBoundingClientRect();
+        if (r.width < 10 || r.height < 10) return -Infinity;
+
+        // Hard reject: teleported far above or far below viewport
+        if (r.bottom < -200) return -Infinity;
+        if (r.top > window.innerHeight + 200) return -Infinity;
+
+        // Find the containing scope (this determines our card's max width)
+        const scope =
+            btn.closest('.hprt-block') ||
+            btn.closest('aside') ||
+            btn.closest('.hprt-reservation-cta') ||
+            btn.parentElement;
+
+        const scopeRect = scope ? scope.getBoundingClientRect() : r;
+
+        // Score: prefer right side + wider containers (avoids sticky mini-clones)
+        const rightBias = (scopeRect.left > window.innerWidth * 0.55) ? 1000 : 0;
+        const widthScore = Math.round(scopeRect.width);
+
+        // In-viewport bonus
+        const inViewportBonus = (r.bottom > 0 && r.top < window.innerHeight) ? 200 : 0;
+
+        // Visible area (tiebreaker)
+        const vx = Math.max(0, Math.min(r.right, window.innerWidth) - Math.max(r.left, 0));
+        const vy = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+        const visibleArea = (vx * vy) / 1000; // Scale down to not dominate
+
+        return rightBias + widthScore + inViewportBonus + visibleArea;
+    }
+
+    /**
+     * Get the containing scope for a button (used for dock slot placement)
+     */
+    function getButtonScope(btn) {
+        if (!btn) return null;
+        return (
+            btn.closest('.hprt-block') ||
+            btn.closest('aside') ||
+            btn.closest('.hprt-reservation-cta') ||
+            btn.parentElement
+        );
+    }
+
+    /**
+     * Ensure we have a persistent dock slot in the correct scope
+     * This prevents random sizing from docking into different containers
+     */
+    function ensureDockSlot(anchorBtn) {
+        if (!anchorBtn) return null;
+
+        const scope = getButtonScope(anchorBtn);
+        if (!scope) return null;
+
+        // Recreate if scope changed or slot was lost
+        if (!dockSlot || !dockSlot.isConnected || dockScope !== scope) {
+            dockScope = scope;
+
+            // Try to find existing slot in this scope
+            dockSlot = scope.querySelector(`#${DOCK_SLOT_ID}`) || document.createElement('div');
+            dockSlot.id = DOCK_SLOT_ID;
+
+            // Make the slot stretch in flex/grid contexts
+            dockSlot.style.cssText = `
+                display: block;
+                width: 100%;
+                max-width: 100%;
+                min-width: 0;
+                box-sizing: border-box;
+                align-self: stretch;
+                justify-self: stretch;
+                margin-top: 10px;
+                margin-bottom: 10px;
+            `;
+
+            // Insert slot right before the anchor button
+            anchorBtn.insertAdjacentElement('beforebegin', dockSlot);
+            console.log('[bookDirect][dockSlot] Created/updated dock slot in scope:', scope.className || scope.tagName);
+        }
+
+        return dockSlot;
+    }
+
+    /**
+     * Find the best (most visible, properly positioned) reserve button
+     */
+    function findBestReserveButton(preferEl) {
+        const buttons = getAllReserveButtons();
+        let best = null;
+        let bestScore = -Infinity;
+
+        for (const b of buttons) {
+            const s = scoreReserveButton(b);
+            if (s > bestScore) {
+                bestScore = s;
+                best = b;
+            }
+        }
+
+        // Anchor stickiness: keep the current anchor if it's still "good enough"
+        // This prevents button ping-pong between competing candidates
+        if (preferEl && preferEl.isConnected) {
+            const ps = scoreReserveButton(preferEl);
+            if (ps > -Infinity && ps >= bestScore - ANCHOR_STICKY_MARGIN) {
+                return preferEl;
+            }
+        }
+
+        if (best) {
+            console.log('[bookDirect][placement] Found best button, score:', bestScore);
+        }
+        return best;
+    }
+
+    /**
+     * Creates or returns the floating host container (for portal docking)
+     * Position is now controlled dynamically via applyHostOverlay/applyHostDocked
+     */
+    function getOrCreateFloatingHost() {
+        let host = document.getElementById('bd-float-host');
+        if (host) return host;
+
+        host = document.createElement('div');
+        host.id = 'bd-float-host';
+        host.style.cssText = `
+            position: fixed;
+            z-index: 2147483647;
+            pointer-events: auto;
+            box-sizing: border-box;
+        `;
+        document.documentElement.appendChild(host);
+
+        // Default to overlay position
+        applyHostOverlay(host);
+
+        console.log('[bookDirect][placement] Created floating host (portal)');
+        return host;
+    }
+
+    // ========================================
+    // RIGHT RAIL HELPERS (Tier B placement)
+    // ========================================
+
+    /**
+     * Find the right rail/sidebar container on the page
+     */
+    function findRightRail() {
+        return (
+            document.querySelector('[data-testid*="right-rail" i]') ||
+            document.querySelector('[data-testid*="property-sidebar" i]') ||
+            document.querySelector('[data-testid="PropertyHeaderContainer"]')?.closest('div[class]')?.parentElement?.lastElementChild ||
+            document.querySelector('#right') ||
+            document.querySelector('aside[class*="sidebar"]') ||
+            document.querySelector('aside') // fallback
+        );
+    }
+
+    /**
+     * Get or create a slot in the right rail for our UI
+     */
+    function getOrCreateRailSlot(rail) {
+        if (!rail) return null;
+
+        let slot = rail.querySelector('#bd-rail-slot');
+        if (slot) return slot;
+
+        slot = document.createElement('div');
+        slot.id = 'bd-rail-slot';
+        slot.style.cssText = `
+            display: block;
+            margin-top: 12px;
+            margin-bottom: 12px;
+            min-width: 0;
+        `;
+
+        // Insert near top but AFTER the rating widget if present
+        const ratingCard =
+            rail.querySelector('[data-testid*="review-score" i]') ||
+            rail.querySelector('[data-testid*="review" i]') ||
+            rail.querySelector('[class*="review"]');
+
+        if (ratingCard && ratingCard.parentElement === rail) {
+            ratingCard.insertAdjacentElement('afterend', slot);
+        } else {
+            rail.prepend(slot);
+        }
+
+        console.log('[bookDirect][placement] Created rail slot');
+        return slot;
+    }
+
+    /**
+     * Check if the right rail is usable (visible and in viewport)
+     */
+    function isUsableRail(rail) {
+        if (!rail) return false;
+
+        const cs = getComputedStyle(rail);
+        if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+
+        const r = rail.getBoundingClientRect();
+
+        // Reject if Booking teleported it far above viewport
+        if (r.bottom < -200) return false;
+
+        return true;
+    }
+
+    /**
+     * Check if a rect is within the visible viewport band (with configurable padding)
+     */
+    function isRectInViewportBand(rect, padTop = 80, padBottom = 80) {
+        return rect.bottom > padTop && rect.top < (window.innerHeight - padBottom);
+    }
+
+    /**
+     * Check if anchor is in the visible viewport band (not just "connected")
+     */
+    function isAnchorInViewportBand(anchorEl) {
+        if (!anchorEl) return false;
+        const r = anchorEl.getBoundingClientRect();
+        const bandTop = 80;
+        const bandBottom = window.innerHeight - 80;
+        return r.bottom > bandTop && r.top < bandBottom;
+    }
+
+    /**
+     * Determines if an anchor element is suitable for docking
+     * Returns false if element is hidden, off-screen, or has hidden ancestors
+     */
+    function isUsableAnchor(anchorEl) {
+        // Debug: force floating mode to test if docking causes layout issues
+        const FLAGS = window.BookDirect?.DEBUG_FLAGS || {};
+        if (FLAGS.FORCE_FLOATING) {
+            console.log('[bookDirect][placement] FORCE_FLOATING enabled, bypassing dock');
+            return false;
+        }
+
+        // Immediately reject disconnected or null nodes
+        if (!anchorEl || !anchorEl.isConnected) return false;
+
+        const cs = getComputedStyle(anchorEl);
+        if (cs.display === 'none' || cs.visibility === 'hidden') {
+            return false;
+        }
+
+        const rect = anchorEl.getBoundingClientRect();
+
+        // Two-threshold hysteresis: harder to undock than to dock
+        // Once docked, only undock if REALLY offscreen; once floating, allow docking earlier
+        const undockThreshold = -320;
+        const dockThreshold = -120;
+        // "button" is the only mode where we're actually docked to the reserve button
+        const threshold = (PLACEMENT.mode === 'button') ? undockThreshold : dockThreshold;
+
+        if (rect.bottom < threshold) {
+            return false;
+        }
+
+        // Also check if dock zone is scrolled BELOW viewport (past bottom of dock area)
+        // Switch to overlay when user scrolls past the dock zone
+        const belowThreshold = (PLACEMENT.mode === 'button') ? 400 : 200;
+        if (rect.top > window.innerHeight + belowThreshold) {
+            return false;
+        }
+
+        // Check if any sticky/fixed ancestor is far above viewport
+        let parent = anchorEl.parentElement;
+        while (parent && parent !== document.documentElement) {
+            const pcs = getComputedStyle(parent);
+            if (pcs.position === 'sticky' || pcs.position === 'fixed') {
+                const pRect = parent.getBoundingClientRect();
+                if (pRect.bottom < -200) {
+                    return false;
+                }
+            }
+            if (pcs.visibility === 'hidden') {
+                return false;
+            }
+            parent = parent.parentElement;
+        }
+
+        return true;
+    }
+
+    /**
+     * Get UI height for threshold calculations
+     */
+    function getUiHeight(uiRoot) {
+        if (!uiRoot) return 300;
+        const r = uiRoot.getBoundingClientRect();
+        return Math.max(120, Math.round(r.height || 300));
+    }
+
+    // ========================================
+    // 3-TIER PLACEMENT SYSTEM
+    // ========================================
+
+    /**
+     * Determine and execute placement using 3-tier strategy:
+     * Tier A: Dock to reserve button (when button is usable AND in viewport band)
+     * Tier B: Dock to right rail (in-flow, no overlap)
+     * Tier C: Fixed overlay fallback (bottom-right)
+     */
+    function placeUI(uiRoot, options = {}) {
+        if (!uiRoot) return null;
+
+        const { animate = true, force = false } = options;
+        const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        const doAnim = animate && !prefersReduced && !PLACEMENT.animating;
+
+        // Re-find best button with stickiness
+        reserveButton = findBestReserveButton(reserveButton);
+
+        const rail = findRightRail();
+        const railSlot = rail ? getOrCreateRailSlot(rail) : null;
+
+        // Determine tier
+        let newMode = 'overlay';
+        let targetContainer = null;
+        let insertMethod = 'appendChild';
+
+        // Tier A: Button docking
+        // - Require viewport band ONLY when entering (prevents accidental dock at edges)
+        // - If already docked, stay docked as long as anchor is usable (stickiness)
+        // - Also check ghost position when already docked
+        const ghost = getOrCreateDockGhost();
+        const HEADER_HEIGHT = 64; // Keep consistent with applyHostDocked
+        const ghostRect = (ghost && ghost.isConnected) ? ghost.getBoundingClientRect() : null;
+
+        // When docked, check if ghost is still visible (not scrolled into clipping region)
+        // Prevents staying "docked" once the ghost moves into the region where clipPath erases the UI
+        // NOTE: Only apply this check when already docked; when in overlay, ghost is collapsed
+        const ghostStillVisible = !ghostRect || (
+            ghostRect.bottom > (HEADER_HEIGHT + 8) &&
+            ghostRect.top < (window.innerHeight - 8)
+        );
+
+        // Decide if we want button dock:
+        // - If already docked ('button' mode): stay docked as long as ghost is visible AND anchor is usable
+        // - If not docked yet (overlay/rail): only dock if reserve button is in viewport band
+        const wantButtonDock =
+            isUsableAnchor(reserveButton) &&
+            (
+                (PLACEMENT.mode === 'button' && ghostStillVisible) ||  // already docked -> check ghost visibility
+                (PLACEMENT.mode !== 'button' && isAnchorInViewportBand(reserveButton))  // not docked -> check button position
+            );
+
+        // Tier B: Rail docking - only choose rail mode when the rail slot itself is visible
+        const railSlotRect = railSlot?.getBoundingClientRect?.();
+        const railSlotVisible = !!railSlotRect && isRectInViewportBand(railSlotRect);
+
+        if (wantButtonDock) {
+            newMode = 'button';
+            targetContainer = reserveButton;
+            insertMethod = 'beforebegin';
+        }
+        // Tier B: Rail docking (in-flow, avoids overlap)
+        else if (railSlot && isUsableRail(rail) && railSlotVisible) {
+            newMode = 'rail';
+            targetContainer = railSlot;
+            insertMethod = 'appendChild';
+        }
+        // Tier C: Overlay fallback
+        else {
+            newMode = 'overlay';
+            targetContainer = getOrCreateFloatingHost();
+            insertMethod = 'appendChild';
+        }
+
+        // Check if already in correct location (use dockSlot for button mode)
+        const currentParent = uiRoot.parentNode;
+        const buttonScope = reserveButton ? getButtonScope(reserveButton) : null;
+        // ghost already declared above
+        const ghostParent = ghost ? ghost.parentNode : null;
+        const alreadyPlaced =
+            PLACEMENT.mode === newMode && (
+                (newMode === 'button' && dockSlot && dockSlot.isConnected && dockScope === buttonScope && ghostParent === dockSlot) ||
+                (newMode === 'rail' && ghostParent === railSlot) ||
+                (newMode === 'overlay')
+            );
+
+        if (alreadyPlaced && !force) {
+            // Overlay mode is self-healing: reassert position + clear clipPath
+            if (newMode === 'overlay') {
+                applyHostOverlay(getOrCreateFloatingHost());
+            } else {
+                scheduleDockSync();
+            }
+            return newMode;
+        }
+
+        // Check cooldown (don't switch rapidly)
+        const now = performance.now();
+        if (!force && PLACEMENT.mode && newMode !== PLACEMENT.mode) {
+            if (now - PLACEMENT.lastSwitchAt < SWITCH_COOLDOWN_MS) {
+                return PLACEMENT.mode;
+            }
+
+            // Dwell check
+            if (PLACEMENT.pendingMode !== newMode) {
+                PLACEMENT.pendingMode = newMode;
+                PLACEMENT.pendingSince = now;
+                return PLACEMENT.mode;
+            }
+            if (now - PLACEMENT.pendingSince < SWITCH_DWELL_MS) {
+                return PLACEMENT.mode;
+            }
+        }
+
+        // Commit the placement
+        const first = doAnim ? uiRoot.getBoundingClientRect() : null;
+        const oldMode = PLACEMENT.mode;
+
+        console.log(`[bookDirect][placement] ${oldMode || 'init'} → ${newMode}`);
+
+        // ========================================
+        // PORTAL DOCKING: UI always in floating host, ghost in dock zones
+        // ========================================
+        const floatHost = getOrCreateFloatingHost();
+        if (uiRoot.parentNode !== floatHost) floatHost.appendChild(uiRoot);
+
+        ensureGhostResizeObserver(uiRoot);
+        // ghost already declared above in alreadyPlaced check
+
+        uiRoot.style.pointerEvents = 'auto';
+
+        if (newMode === 'button') {
+            // Put the GHOST in the dock slot (not the UI)
+            const slot = ensureDockSlot(targetContainer);
+            if (slot && ghost.parentNode !== slot) slot.appendChild(ghost);
+
+            // Size placeholder and position floating host over it
+            syncGhostHeight(uiRoot);
+            applyHostDocked(floatHost, ghost);
+
+            const r = uiRoot.getBoundingClientRect();
+            PLACEMENT.lastDockLeft = r.left;
+        }
+        else if (newMode === 'rail') {
+            // Put ghost in rail slot
+            if (railSlot && ghost.parentNode !== railSlot) railSlot.appendChild(ghost);
+
+            syncGhostHeight(uiRoot);
+            applyHostDocked(floatHost, ghost);
+
+            const r = uiRoot.getBoundingClientRect();
+            PLACEMENT.lastDockLeft = r.left;
+        }
+        else {
+            // Overlay fallback - collapse ghost
+            if (ghost && ghost.isConnected) ghost.style.height = '0px';
+            applyHostOverlay(floatHost);
+        }
+
+        PLACEMENT.mode = newMode;
+        PLACEMENT.lastSwitchAt = now;
+        PLACEMENT.pendingMode = null;
+
+        // Repair layout after mode change (fixes gap issues)
+        if (oldMode && oldMode !== newMode) {
+            repairBookingLayout(`mode-change:${oldMode}->${newMode}`);
+        }
+
+        // Layout nudge
+        requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+
+        // FLIP animation
+        if (doAnim && first && oldMode && oldMode !== newMode) {
+            const last = uiRoot.getBoundingClientRect();
+            const dx = first.left - last.left;
+            const dy = first.top - last.top;
+
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                PLACEMENT.animating = true;
+
+                uiRoot.style.transition = 'none';
+                uiRoot.style.transform = `translate(${dx}px, ${dy}px)`;
+                uiRoot.getBoundingClientRect(); // force reflow
+
+                uiRoot.style.transition = 'transform 180ms ease-out, opacity 180ms ease-out';
+                uiRoot.style.transform = 'translate(0px, 0px)';
+
+                const finish = () => {
+                    PLACEMENT.animating = false;
+                    uiRoot.style.transition = '';
+                    uiRoot.style.transform = '';
+                };
+
+                uiRoot.addEventListener('transitionend', finish, { once: true });
+                setTimeout(finish, 260);
+            }
+        }
+
+        // Visibility seatbelt: if we docked but landed offscreen, force overlay
+        if (newMode !== 'overlay') {
+            requestAnimationFrame(() => {
+                const r = uiRoot.getBoundingClientRect();
+                const isOnScreen = r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
+                if (!isOnScreen) {
+                    console.log('[bookDirect][placement] dock landed offscreen -> forcing overlay');
+                    placeUI(uiRoot, { force: true, animate: false });
+                }
+            });
+        }
+
+        return newMode;
+    }
+
+    // ========================================
+    // SCROLL-IDLE GATING + PORTAL DOCK SYNC
+    // ========================================
+    let scrolling = false;
+    let scrollIdleTimer = null;
+    let dockSyncRAF = false;
+
+    /**
+     * Keep floating host aligned over ghost while scrolling (portal docking)
+     */
+    function scheduleDockSync() {
+        if (dockSyncRAF) return;
+        dockSyncRAF = true;
+
+        requestAnimationFrame(() => {
+            dockSyncRAF = false;
+            if (!app) return;
+            if (PLACEMENT.mode === 'overlay') return;
+
+            const floatHost = getOrCreateFloatingHost();
+            const ghost = getOrCreateDockGhost();
+            if (!ghost.isConnected) return;
+
+            syncGhostHeight(app);
+            applyHostDocked(floatHost, ghost);
+        });
+    }
+
+    /**
+     * Throttled placement check with scroll-idle gating
+     */
+    let placementThrottled = false;
+    function checkPlacementThrottled() {
+        if (placementThrottled || !app) return;
+        placementThrottled = true;
+
+        requestAnimationFrame(() => {
+            // Don't switch while actively scrolling (unless container is gone)
+            if (scrolling && document.documentElement.contains(app)) {
+                placementThrottled = false;
+                return;
+            }
+            placeUI(app);
+            placementThrottled = false;
+        });
+    }
+
+    // Scroll event with idle detection + first-scroll repair + dock sync
+    window.addEventListener('scroll', () => {
+        scrolling = true;
+        clearTimeout(scrollIdleTimer);
+
+        // Keep docked host aligned while scrolling (portal docking)
+        if (app && PLACEMENT.mode !== 'overlay') {
+            scheduleDockSync();
+        }
+
+        // First-scroll repair (matches reproduction: refresh at top → scroll down → gap)
+        if (!didFirstScrollRepair && app) {
+            didFirstScrollRepair = true;
+            setTimeout(() => {
+                repairBookingLayout('first-scroll');
+                hiddenRedockNudge();
+            }, 0);
+        }
+
+        scrollIdleTimer = setTimeout(() => {
+            scrolling = false;
+            // Now safe to commit placement change
+            if (app) placeUI(app);
+        }, 150);
+    }, { passive: true });
+
+    window.addEventListener('resize', () => {
+        checkPlacementThrottled();
+        scheduleDockSync();
+    }, { passive: true });
 
     const SELECTORS = {
         search: {
@@ -502,6 +1482,8 @@
 
     // --- STRATEGY 2: DETAILS PAGE (Sidebar Injection) ---
     function handleDetailsPage() {
+        console.log('[bookDirect][handleDetailsPage] Starting detection...');
+
         // First check: Are we on a hotel detail page?
         // Look for elements that only exist on hotel detail pages (not search results)
         const roomTable = document.querySelector('.hprt-table') ||
@@ -513,7 +1495,16 @@
         // Also check URL pattern for hotel pages
         const isHotelUrl = window.location.pathname.includes('/hotel/');
 
-        if (!roomTable && !isHotelUrl) return false; // Not a hotel detail page
+        console.log('[bookDirect][handleDetailsPage] Detection:', {
+            roomTableFound: !!roomTable,
+            isHotelUrl,
+            pathname: window.location.pathname
+        });
+
+        if (!roomTable && !isHotelUrl) {
+            console.log('[bookDirect][handleDetailsPage] FAILED: Not a hotel detail page');
+            return false;
+        }
 
         // 1. ANCHOR: The "I'll Reserve" Button (specific selectors only, no generic submit)
         const button = document.querySelector('.js-reservation-button') ||
@@ -521,7 +1512,15 @@
             document.querySelector('.hprt-reservation-cta button[type="submit"]') ||
             document.querySelector('button.bui-button--primary[type="submit"]');
 
-        if (!button) return false;
+        console.log('[bookDirect][handleDetailsPage] Button search:', {
+            found: !!button,
+            buttonText: button?.innerText?.slice(0, 30) || 'N/A'
+        });
+
+        if (!button) {
+            console.log('[bookDirect][handleDetailsPage] FAILED: Reserve button not found');
+            return false;
+        }
 
         // Traverse UP to find the main sidebar block
         // We look for a parent that contains the whole right-side reservation block
@@ -574,12 +1573,53 @@
         if (!app && window.BookDirect) {
             app = window.BookDirect.createUI(hotelName, initialPrice, true);
 
-            // Injection Point: Insert just before the reserve button
-            // Avoid inserting as firstElementChild - that can break Booking's :first-child CSS rules
-            const injectionTarget = button.parentElement;
-            injectionTarget.insertBefore(app, button);
+            // Store the button we found as initial anchor
+            reserveButton = button;
+
+            console.log('[bookDirect][handleDetailsPage] UI created, using dock/float placement');
+
+            // Initial placement using dock/float system
+            placeUI(app);
+
+            // Initialize repair system to fix layout issues after injection
+            initRepairSystem();
+
+            // Watch for Booking.com hydration removing our element
+            // This happens on page refresh when Booking re-renders the sidebar
+            let hydrationCheckCount = 0;
+            const maxHydrationChecks = 10;
+
+            const checkHydrationAndPlace = () => {
+                hydrationCheckCount++;
+
+                // Re-find best visible button (Booking may have swapped DOM)
+                reserveButton = findBestReserveButton(reserveButton);
+
+                // Check if app still in DOM (use documentElement for floating mode)
+                if (!document.documentElement.contains(app)) {
+                    console.log(`[bookDirect][hydration-guard] ⚠️ App removed, re-placing (check ${hydrationCheckCount}/${maxHydrationChecks})`);
+                }
+
+                // Always go through dock/float logic (handles both re-injection and mode switching)
+                placeUI(app);
+
+                // Schedule more checks during hydration window
+                if (hydrationCheckCount < maxHydrationChecks) {
+                    setTimeout(checkHydrationAndPlace, 500);
+                }
+            };
+
+            // Check frequently during first few seconds to catch hydration
+            setTimeout(checkHydrationAndPlace, 300);
+            setTimeout(checkHydrationAndPlace, 600);
+            setTimeout(checkHydrationAndPlace, 1000);
+            setTimeout(checkHydrationAndPlace, 2000);
+            setTimeout(checkHydrationAndPlace, 3000);
+
         } else if (app && app.updatePrice) {
             app.updatePrice(initialPrice);
+            // Ensure placement is correct on update too
+            placeUI(app);
         }
 
         function getRoomDetails() {
@@ -662,27 +1702,69 @@
     }
 
     function inject() {
-        if (window.hasBookDirectInjected) return;
-        if (!window.BookDirect) return;
+        console.log('[bookDirect][inject] Called. State:', {
+            hasBookDirectInjected: window.hasBookDirectInjected,
+            appExists: !!app,
+            appInDOM: app ? document.documentElement.contains(app) : 'N/A',
+            BookDirectExists: !!window.BookDirect
+        });
+
+        // Handle bfcache (back/forward navigation) - if app exists but is not in DOM, reset
+        // Use documentElement.contains because floating mode appends to documentElement
+        if (app && !document.documentElement.contains(app)) {
+            console.log('[bookDirect][inject] App reference stale (not in DOM), resetting');
+            app = null;
+            window.hasBookDirectInjected = false;
+        }
+
+        if (window.hasBookDirectInjected && app) {
+            console.log('[bookDirect][inject] BLOCKED: Already injected and app exists');
+            return;
+        }
+        if (!window.BookDirect) {
+            console.log('[bookDirect][inject] BLOCKED: window.BookDirect not available');
+            return;
+        }
 
         // NOTE: Search results prefetch is handled by the immediate page router IIFE
         // which runs before this hotel-page IIFE and sets window.__bookDirect_isSearchPage
 
+        console.log('[bookDirect][inject] Calling handleDetailsPage()...');
         if (handleDetailsPage()) {
             window.hasBookDirectInjected = true;
             // Send page context to background for price comparison
             sendPageContext();
 
+            const FLAGS = window.BookDirect?.DEBUG_FLAGS || {};
+
             // ✅ NUCLEAR FIX: Prevent horizontal scroll drift caused by Booking.com's layout quirk
             // (Booking's carousel/grid elements can be a few pixels wider than viewport)
-            document.documentElement.style.overflowX = 'hidden';
-            document.body.style.overflowX = 'hidden';
+            // DEBUG: Skip if disabled
+            if (FLAGS.ENABLE_OVERFLOW_FIX !== false) {
+                document.documentElement.style.overflowX = 'hidden';
+                document.body.style.overflowX = 'hidden';
+                // Keep Booking's sticky measurements in sync after overflow change
+                requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+            } else {
+                console.log('[bookDirect][debug] overflow-x:hidden disabled via DEBUG_FLAGS');
+            }
 
             // 🔍 OVERFLOW DIAGNOSTICS: Hook room select and scrollX watcher for debugging
             // Filter console by [bookDirect][overflow] to see metrics and offender elements
-            if (window.bookDirectOverflowDiagnostics) {
+            // DEBUG: Skip if disabled
+            if (FLAGS.ENABLE_DIAGNOSTICS !== false && window.bookDirectOverflowDiagnostics) {
                 window.bookDirectOverflowDiagnostics.hookRoomSelect();
                 window.bookDirectOverflowDiagnostics.hookScrollXWatcher();
+            } else if (FLAGS.ENABLE_DIAGNOSTICS === false) {
+                console.log('[bookDirect][debug] Diagnostics disabled via DEBUG_FLAGS');
+            }
+
+            // ✅ ROOM SELECT STABILIZER: fixes the "gap" that appears after changing room dropdowns
+            // DEBUG: Skip if disabled
+            if (FLAGS.ENABLE_ROOM_SELECT_STABILIZER !== false) {
+                armRoomSelectStabilizer();
+            } else {
+                console.log('[bookDirect][debug] Room select stabilizer disabled via DEBUG_FLAGS');
             }
 
             return;
@@ -699,11 +1781,17 @@
     // --- INITIALIZATION: MutationObserver Pattern ---
     // Watch for DOM changes until hotel title element exists
     function waitForHotelElement() {
+        console.log('[bookDirect][waitForHotelElement] Called. hasBookDirectInjected:', window.hasBookDirectInjected);
+
         // Already injected? Done.
-        if (window.hasBookDirectInjected) return;
+        if (window.hasBookDirectInjected) {
+            console.log('[bookDirect][waitForHotelElement] BLOCKED: Already injected');
+            return;
+        }
 
         // Check if BookDirect UI factory is available
         if (!window.BookDirect) {
+            console.log('[bookDirect][waitForHotelElement] Waiting for BookDirect factory...');
             // Factory not loaded yet, retry shortly
             requestAnimationFrame(waitForHotelElement);
             return;
@@ -757,6 +1845,19 @@
             }
         }, 30000);
     }
+
+    // Handle bfcache (back-forward cache) restores
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted) {
+            console.log('bookDirect: Page restored from bfcache, re-checking injection');
+            // Reset injection flag if app is not in DOM (use documentElement for floating mode)
+            if (app && !document.documentElement.contains(app)) {
+                app = null;
+                window.hasBookDirectInjected = false;
+            }
+            inject();
+        }
+    });
 
     // Start watching once DOM is ready
     if (document.readyState === 'loading') {

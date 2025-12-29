@@ -9,6 +9,10 @@ const CTX_PREFIX = "bd_ctx_v1:";
 // DEV flag: set to true to enable debug mode in /compare calls
 const DEV_DEBUG = false;
 
+// --- FORCE REFRESH THROTTLE ---
+const forceRefreshCooldowns = new Map(); // key -> cooldownUntil timestamp
+const FORCE_REFRESH_COOLDOWN_MS = 60000; // 60s
+
 // --- CTX STORAGE HELPERS ---
 // Normalize currency to 3-letter ISO code (default USD)
 function normCurrency(c) {
@@ -142,7 +146,7 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            console.error('bookDirect: Compare API error response:', response.status, errorData);
+            console.error('bookDirect: Compare API error response:', response.status, JSON.stringify(errorData));
             return {
                 error: errorData.error || `API error: ${response.status}`,
                 status: response.status,
@@ -369,14 +373,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const u = new URL(`${WORKER_BASE_URL}/`);
         u.searchParams.set('query', query);
 
-        fetch(u.toString())
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
+        // Transient error codes that should be retried
+        const TRANSIENT_CODES = [502, 503, 429];
+
+        const fetchWithRetry = async (url, retries = 1) => {
+            const response = await fetch(url);
+            if (!response.ok) {
+                // Check if it's a transient error worth retrying
+                if (TRANSIENT_CODES.includes(response.status) && retries > 0) {
+                    // Jittered backoff: 500-800ms
+                    const delay = 500 + Math.random() * 300;
+                    console.warn(`bookDirect: Hotel details HTTP ${response.status}, retrying in ${Math.round(delay)}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                    return fetchWithRetry(url, retries - 1);
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return response.json();
+        };
+
+        fetchWithRetry(u.toString())
             .then(data => sendResponse(data))
             .catch(err => {
-                console.error('bookDirect: Hotel details fetch failed:', err);
+                // Use console.warn for transient errors, console.error for real failures
+                const isTransient = err.message && /HTTP (502|503|429)/.test(err.message);
+                if (isTransient) {
+                    console.warn('bookDirect: Hotel details fetch failed (transient):', err.message);
+                } else {
+                    console.error('bookDirect: Hotel details fetch failed:', err);
+                }
                 sendResponse({ error: err.message || 'Fetch failed' });
             });
 
@@ -392,10 +417,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return false;
         }
 
-        // Merge officialUrl from message if provided
+        // Merge officialUrl, hotelName, bookingUrl from message if provided (prefer message over context)
         const params = {
             ...context,
-            officialUrl: message.officialUrl || context.officialUrl
+            officialUrl: message.officialUrl || context.officialUrl,
+            hotelName: message.hotelName || context.hotelName,
+            bookingUrl: message.bookingUrl || context.bookingUrl
         };
 
         // Check if we have required params
@@ -427,7 +454,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Keep channel open for async
     }
 
-    // Refresh compare (force fresh fetch - user clicked Refresh)
+    // Refresh compare (force fresh fetch - user clicked Refresh or Retry match)
     if (message.type === 'REFRESH_COMPARE') {
         const context = tabId ? tabContexts.get(tabId) : null;
 
@@ -438,8 +465,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         const params = {
             ...context,
-            officialUrl: message.officialUrl || context.officialUrl
+            officialUrl: message.officialUrl || context.officialUrl,
+            hotelName: message.hotelName || context.hotelName,
+            bookingUrl: message.bookingUrl || context.bookingUrl
         };
+
+        // Throttle key uses bookingUrl (most unique) or falls back to params
+        const throttleKey = params.bookingUrl
+            || `${params.gl || ''}|${params.hotelName}|${params.checkIn}|${params.checkOut}|${params.adults || ''}|${params.currency || ''}`;
+
+        const now = Date.now();
+        const cooldownUntil = forceRefreshCooldowns.get(throttleKey) || 0;
+        const isSystemRefresh = message.reason === 'officialUrl_late';
+
+        // Throttle user-initiated refreshes, but bypass for system refresh (officialUrl late arrival)
+        if (!isSystemRefresh && now < cooldownUntil) {
+            const cached = getCachedCompare(tabId, params);
+            if (cached) {
+                console.log('bookDirect: Force refresh throttled, returning cached');
+                sendResponse({ ...cached, throttled: true, retryAfterMs: cooldownUntil - now });
+                return false;
+            }
+        }
+
+        // Set cooldown only for user-initiated refreshes
+        if (!isSystemRefresh) {
+            forceRefreshCooldowns.set(throttleKey, now + FORCE_REFRESH_COOLDOWN_MS);
+        }
 
         // Force refresh bypasses cache (but still dedupes in-flight)
         fetchCompareDeduped(tabId, params, true).then(data => {

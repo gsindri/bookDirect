@@ -1,8 +1,28 @@
 // Factory function to create the UI
 window.BookDirect = window.BookDirect || {};
 
+// ========================================
+// DEBUG FLAGS - Toggle features to isolate layout bugs
+// Set to false to disable a feature
+// ========================================
+window.BookDirect.DEBUG_FLAGS = {
+  ENABLE_SCREENSHOT: true,          // Screenshot capture on "Request Offer"
+  ENABLE_HIGHLIGHT_BUBBLE: true,    // Table highlight + bubble when no room selected
+  ENABLE_SCROLL_INTO_VIEW: true,    // scrollIntoView in highlight function
+  ENABLE_DATE_GRID_INJECTION: true, // Inject date grid into sidebar for screenshot
+  ENABLE_OVERFLOW_FIX: true,        // overflow-x:hidden on html/body (nuclear fix)
+  ENABLE_DIAGNOSTICS: true,         // Overflow diagnostics hooks
+  FORCE_FLOATING: false,            // Force floating mode (bypass docking) for testing
+  ENABLE_ROOM_SELECT_STABILIZER: true, // Fix gap after room dropdown change
+};
+
 window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   const container = document.createElement('div');
+
+  // Force visibility even when Booking.com hides parent sidebar on scroll
+  // Inline styles have highest specificity and override inherited visibility:hidden
+  container.style.cssText = 'visibility: visible !important; opacity: 1 !important; display: block !important;';
+
   const shadowRoot = container.attachShadow({ mode: 'closed' });
 
   // Internal state
@@ -20,6 +40,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       :host, .host-wrapper {
         position: relative;
         display: block;
+        visibility: visible !important; /* Override Booking's visibility:hidden on scroll */
+        opacity: 1 !important;
         max-width: 100%; /* Prevent overflow but don't force full width */
         min-width: 0; /* Key for flex contexts - prevents widening parent */
         margin-top: 10px;
@@ -160,12 +182,18 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       }
 
       .price-label {
+        flex: 1 1 auto;
+        min-width: 0;            /* critical for flex shrink */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         font-size: 12px;
         font-weight: 600;
         color: #6b7280;
       }
 
       .price-value {
+        flex: 0 0 auto;          /* keep price readable */
         white-space: nowrap;
         font-variant-numeric: tabular-nums;
         font-feature-settings: "tnum" 1;
@@ -525,6 +553,15 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         border-top: 1px solid rgba(0,0,0,0.06);
       }
 
+      .compare-header {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #94a3b8;
+        margin-bottom: 8px;
+      }
+
       .compare-content {
         margin-top: 10px;
       }
@@ -563,23 +600,42 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         padding: 8px 0;
       }
 
+      /* Mismatch warning */
+      .compare-mismatch-warning {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: #856404;
+      }
+
+      /* 2-LINE GRID LAYOUT for compare rows */
       .compare-row {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+          "source price"
+          "tags price";
+        column-gap: 8px;
+        row-gap: 2px;
+        align-items: start;
         padding: 8px 0;
         font-size: 13px;
         border-bottom: 1px solid rgba(0,0,0,0.04);
       }
 
-      .compare-row:last-child {
+      .compare-row:last-of-type {
         border-bottom: none;
       }
 
       .compare-source {
-        display: flex;
-        align-items: center;
-        gap: 6px;
+        grid-area: source;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         color: #374151;
         font-weight: 500;
       }
@@ -589,8 +645,36 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         font-weight: 600;
       }
 
-      .compare-source.is-current {
-        color: #6b7280;
+      .compare-tags {
+        grid-area: tags;
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+
+      .compare-tags:empty {
+        display: none;
+      }
+
+      .compare-price {
+        grid-area: price;
+        justify-self: end;
+        align-self: center;
+        white-space: nowrap;
+        text-align: right;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: #1f2937;
+      }
+
+      .compare-price a {
+        color: inherit;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .compare-price a:hover {
+        text-decoration: underline;
       }
 
       .compare-badge {
@@ -614,19 +698,16 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         color: #003580;
       }
 
-      .compare-price {
-        text-align: right;
-        font-weight: 600;
-        color: #1f2937;
+      .compare-badge.member,
+      .compare-badge.login {
+        background: rgba(234, 179, 8, 0.15);
+        color: #a16207;
       }
 
-      .compare-price a {
-        color: inherit;
-        text-decoration: none;
-      }
-
-      .compare-price a:hover {
-        text-decoration: underline;
+      .compare-badge.mobile,
+      .compare-badge.promo {
+        background: rgba(139, 92, 246, 0.1);
+        color: #7c3aed;
       }
 
       .compare-savings {
@@ -640,6 +721,29 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         font-size: 13px;
         font-weight: 600;
         color: #059669;
+      }
+
+      .compare-member-note {
+        font-size: 11px;
+        color: #a16207;
+        margin-top: 8px;
+        padding: 6px 10px;
+        background: rgba(234, 179, 8, 0.08);
+        border-radius: 6px;
+      }
+
+      .compare-toggle {
+        background: none;
+        border: none;
+        font-size: 12px;
+        color: #003580;
+        cursor: pointer;
+        padding: 6px 0;
+        margin-top: 4px;
+      }
+
+      .compare-toggle:hover {
+        text-decoration: underline;
       }
 
       .compare-footer {
@@ -662,6 +766,19 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         opacity: 1;
         text-decoration: underline;
       }
+
+      /* COMPACT MODE (narrow widths) */
+      .compare-section.compact .compare-source {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+
+      .compare-section.compact .compare-badge {
+        font-size: 9px;
+        padding: 2px 4px;
+      }
     `;
 
   const html = `
@@ -679,7 +796,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             
             <!-- Price (Hero) -->
             <div class="price-row">
-              <span class="price-label">Price</span>
+              <span id="price-label" class="price-label" title="Booking.com price you're viewing">Booking.com (viewing)</span>
               <span class="price-value" id="price-display">${_price}</span>
             </div>
             
@@ -712,7 +829,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             
             <!-- Price Comparison Section (Hidden by default) -->
             <div id="compare-section" class="compare-section" style="display:none;">
-              <div class="section-header">Price Comparison</div>
+              <div class="compare-header">Prices found</div>
               <div id="compare-content" class="compare-content">
                 <!-- Loading state -->
                 <div id="compare-loading" class="compare-loading" style="display:none;">
@@ -940,6 +1057,14 @@ Best regards,`;
   }
 
   function highlightTableAndShowBubble() {
+    const FLAGS = window.BookDirect?.DEBUG_FLAGS || {};
+
+    // DEBUG: Skip highlight/bubble entirely if disabled
+    if (FLAGS.ENABLE_HIGHLIGHT_BUBBLE === false) {
+      console.log('[bookDirect][debug] Highlight/bubble disabled via DEBUG_FLAGS');
+      return false;
+    }
+
     // Find the dropdowns in the REAL DOM
     const selects = document.querySelectorAll('.hprt-nos-select, .hprt-table select');
     if (!selects.length) return false;
@@ -959,13 +1084,18 @@ Best regards,`;
 
     // 2. Scroll to the TABLE (block-level anchor), not the select
     // This avoids triggering horizontal scroll to "reveal" the select
-    const scrollAnchor =
-      firstSelect.closest('table') ||
-      firstSelect.closest('[data-testid]') ||
-      firstSelect.closest('section') ||
-      firstSelect;
+    // DEBUG: Skip scrollIntoView if disabled
+    if (FLAGS.ENABLE_SCROLL_INTO_VIEW !== false) {
+      const scrollAnchor =
+        firstSelect.closest('table') ||
+        firstSelect.closest('[data-testid]') ||
+        firstSelect.closest('section') ||
+        firstSelect;
 
-    scrollAnchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      scrollAnchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    } else {
+      console.log('[bookDirect][debug] scrollIntoView disabled via DEBUG_FLAGS');
+    }
 
     // 3. Restore horizontal scrollLeft after browser finishes scroll
     // Use rAF to run after the browser's scroll step
@@ -1208,10 +1338,14 @@ Best regards,`;
             }
 
             // STEP C: Inject date grid
-            if (sidebarEl) {
+            // DEBUG: Skip date grid injection if disabled
+            const FLAGS = window.BookDirect?.DEBUG_FLAGS || {};
+            if (sidebarEl && FLAGS.ENABLE_DATE_GRID_INJECTION !== false) {
               injectedDiv = createDateGrid(checkIn, checkOut, _hotelName);
               sidebarEl.prepend(injectedDiv);
               sidebarEl.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
+            } else if (FLAGS.ENABLE_DATE_GRID_INJECTION === false) {
+              console.log('[bookDirect][debug] Date grid injection disabled via DEBUG_FLAGS');
             }
 
             // STEP D: Wait for scroll, then capture
@@ -1300,14 +1434,23 @@ Best regards,`;
   }
 
   async function copyToClipboard() {
+    const FLAGS = window.BookDirect?.DEBUG_FLAGS || {};
+
     try {
       // FIX: Ensure document has focus for clipboard API
       window.focus();
 
+      // DEBUG: Skip screenshot if disabled
+      if (FLAGS.ENABLE_SCREENSHOT === false) {
+        console.log('[bookDirect][debug] Screenshot disabled via DEBUG_FLAGS');
+        showToast();
+        return;
+      }
+
       await captureAndCopyScreenshot();
       showToast();
     } catch (e) {
-      console.error('Screenshot copy failed', e);
+      console.error('Screenshot copy failed:', e.message || e.name || String(e));
 
       // If it was a permission/screenshot specific error, show that
       // Otherwise fall back to text
@@ -1506,6 +1649,15 @@ Best regards,`;
 
   // --- PRICE COMPARISON LOGIC ---
   let _officialUrl = null; // Will be set from contact lookup
+  let _compareCalledOnce = false;
+  let _compareUsedOfficialUrl = false;
+  let _waitingForOfficialUrl = true;
+  let _compareReqSeq = 0;           // Race-condition guard
+  let _lastCompareData = null;      // Store for footer logic
+  let _currentMismatch = false;
+  let _retryMatchCooldownUntil = 0;
+  let _cooldownTimer = null;
+  let _lastCompareClickAt = 0;      // Click debounce
 
   // Get DOM elements for compare section
   const compareSection = shadowRoot.getElementById('compare-section');
@@ -1517,11 +1669,29 @@ Best regards,`;
   const compareTimestamp = shadowRoot.getElementById('compare-timestamp');
   const compareRefresh = shadowRoot.getElementById('compare-refresh');
 
-  // Helper: Format price with currency
+  // Compact mode detection via ResizeObserver on container
+  const containerEl = shadowRoot.querySelector('.container');
+  const priceLabel = shadowRoot.getElementById('price-label');
+  if (containerEl && compareSection) {
+    const compactRO = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect?.width || 0;
+      const isCompact = w < 360;
+      compareSection.classList.toggle('compact', isCompact);
+
+      // Shorten hero label in compact mode
+      if (priceLabel) {
+        priceLabel.textContent = isCompact ? 'Booking' : 'Booking.com (viewing)';
+      }
+    });
+    compactRO.observe(containerEl);
+  }
+
+  // Helper: Format price with currency (uses NBSP to prevent line breaks)
   function formatComparePrice(total, currency) {
     if (total == null) return '—';
     const formatted = total.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-    return `${currency || ''} ${formatted}`.trim();
+    if (!currency) return formatted;
+    return `${currency}\u00A0${formatted}`;  // NBSP between currency and number
   }
 
   // Helper: Format timestamp
@@ -1540,11 +1710,80 @@ Best regards,`;
     compareFooter.style.display = state === 'results' ? 'flex' : 'none';
   }
 
+  // --- MISMATCH DETECTION HELPERS ---
+  function normalizeNameForComparison(s) {
+    return String(s || '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\b(hotel|resort|inn|suites?|apartments?)\b/gi, '')
+      .trim();
+  }
+
+  function checkNameMismatch(searchedName, matchedName) {
+    if (!matchedName) return { isMismatch: false };
+    const a = normalizeNameForComparison(searchedName);
+    const b = normalizeNameForComparison(matchedName);
+
+    const aTokens = a.split(' ').filter(Boolean);
+    const bTokens = new Set(b.split(' ').filter(Boolean));
+    const hits = aTokens.filter(t => bTokens.has(t)).length;
+    const coverage = aTokens.length > 0 ? hits / aTokens.length : 0;
+
+    // Strong disambiguators only
+    const keyTokens = ['airport', 'station', 'beach', 'downtown', 'central', 'centre', 'oldtown', 'harbor', 'harbour'];
+    const aKeyTokens = keyTokens.filter(k => a.includes(k));
+    const missingKeyTokens = aKeyTokens.filter(k => !b.includes(k));
+
+    return { isMismatch: coverage < 0.4 || missingKeyTokens.length > 0, matchedName };
+  }
+
+  // --- MEANINGFUL SAVINGS THRESHOLD ---
+  function isMeaningfulSavings(savings, baseTotal, currency) {
+    const MIN_PCT = 0.015; // 1.5%
+    const MIN_ABS_BY_CCY = {
+      USD: 5, EUR: 5, GBP: 5,
+      CAD: 7, AUD: 7,
+      DKK: 35, SEK: 50, NOK: 50,
+      ISK: 500,
+      JPY: 600,
+      KRW: 5000
+    };
+    const minAbs = MIN_ABS_BY_CCY[currency] ?? 5;
+    const minPct = baseTotal > 0 ? baseTotal * MIN_PCT : Infinity;
+    return savings >= Math.max(minAbs, minPct);
+  }
+
+  // --- FOOTER UPDATE FUNCTION ---
+  function updateCompareFooter() {
+    const data = _lastCompareData;
+    const showRetry = _currentMismatch || data?.error || data?.matchUncertain;
+    const now = Date.now();
+    const cooldownRemaining = Math.max(0, Math.ceil((_retryMatchCooldownUntil - now) / 1000));
+
+    if (showRetry) {
+      if (cooldownRemaining > 0) {
+        compareRefresh.textContent = 'Retry match';
+        compareRefresh.style.pointerEvents = 'none';
+        compareRefresh.style.opacity = '0.5';
+      } else {
+        compareRefresh.textContent = 'Retry match';
+        compareRefresh.style.pointerEvents = '';
+        compareRefresh.style.opacity = '';
+      }
+      compareRefresh.dataset.expensive = 'true';
+    } else {
+      compareRefresh.textContent = 'Refresh';
+      compareRefresh.style.pointerEvents = '';
+      compareRefresh.style.opacity = '';
+      compareRefresh.dataset.expensive = 'false';
+    }
+  }
+
   // Render compare results
   function renderCompareResults(data) {
     if (!data || data.error) {
       compareError.textContent = data?.error || 'Unable to compare prices.';
       showCompareState('error');
+      updateCompareFooter();
       return;
     }
 
@@ -1552,70 +1791,114 @@ Best regards,`;
     console.log('bookDirect: Compare response data:', data);
     console.log('bookDirect: Offers count:', data.offersCount, 'cheapestOverall:', data.cheapestOverall, 'cheapestOfficial:', data.cheapestOfficial);
 
+    // --- MISMATCH DETECTION ---
+    // Use match.matchedHotelName, or fall back to property.name (cached responses may not have matchedHotelName)
+    const matchedHotelName = data.match?.matchedHotelName || data.matchedHotelName || data.property?.name || null;
+    const mismatchCheck = checkNameMismatch(_hotelName, matchedHotelName);
+    const isLowConfidence = (data.match?.confidence ?? 1) < 0.4;
+
+    // Debug: Log mismatch detection values
+    console.log('bookDirect: Mismatch detection:', {
+      searchedHotel: _hotelName,
+      matchedHotel: matchedHotelName,
+      isMismatch: mismatchCheck.isMismatch,
+      confidence: data.match?.confidence,
+      isLowConfidence,
+      matchUncertain: data.matchUncertain
+    });
+
+    _currentMismatch = mismatchCheck.isMismatch || isLowConfidence || data.matchUncertain;
+
     const currency = data.query?.currency || 'USD';
     const { cheapestOverall, cheapestOfficial, currentOtaOffer, bookingOffer } = data;
 
     let html = '';
 
+    // Show mismatch warning at top if detected
+    if (_currentMismatch && matchedHotelName) {
+      html += `
+        <div class="compare-mismatch-warning">
+          ⚠️ Prices may be for: <strong>${matchedHotelName}</strong>
+        </div>
+      `;
+    }
+
     // Cheapest overall
     if (cheapestOverall) {
-      const isCheapest = true;
+      const sourceLabel = cheapestOverall.source || 'Best price';
       const priceLink = cheapestOverall.link
         ? `<a href="${cheapestOverall.link}" target="_blank" rel="noopener">${formatComparePrice(cheapestOverall.total, currency)}</a>`
         : formatComparePrice(cheapestOverall.total, currency);
 
+      // Build badges array
+      const badges = ['<span class="compare-badge cheapest">Cheapest</span>'];
+      for (const b of (cheapestOverall.badges || [])) {
+        badges.push(`<span class="compare-badge ${b.toLowerCase()}">${b}</span>`);
+      }
+
       html += `
         <div class="compare-row">
-          <div class="compare-source is-cheapest">
-            ${cheapestOverall.source || 'Best price'}
-            <span class="compare-badge cheapest">Cheapest</span>
-          </div>
+          <div class="compare-source is-cheapest" title="${sourceLabel}">${sourceLabel}</div>
           <div class="compare-price">${priceLink}</div>
+          <div class="compare-tags">${badges.join('')}</div>
         </div>
       `;
     }
 
     // Official site (if different from cheapest)
     if (cheapestOfficial && cheapestOfficial.source !== cheapestOverall?.source) {
+      const fullSourceName = cheapestOfficial.source || 'Official Site'; // Keep for tooltip
       const priceLink = cheapestOfficial.link
         ? `<a href="${cheapestOfficial.link}" target="_blank" rel="noopener">${formatComparePrice(cheapestOfficial.total, currency)}</a>`
         : formatComparePrice(cheapestOfficial.total, currency);
 
+      // Build badges array
+      const badges = ['<span class="compare-badge official">Direct</span>'];
+      for (const b of (cheapestOfficial.badges || [])) {
+        badges.push(`<span class="compare-badge ${b.toLowerCase()}">${b}</span>`);
+      }
+
       html += `
         <div class="compare-row">
-          <div class="compare-source">
-            Official Site
-            <span class="compare-badge official">Direct</span>
-          </div>
+          <div class="compare-source" title="${fullSourceName}">Official site</div>
           <div class="compare-price">${priceLink}</div>
+          <div class="compare-tags">${badges.join('')}</div>
         </div>
       `;
     }
 
-    // Current OTA (what user is viewing)
+    // NOTE: Removed duplicate 'Booking.com (viewing)' row - already shown in hero section above
     const currentOffer = currentOtaOffer || bookingOffer;
-    if (currentOffer && currentOffer.source !== cheapestOverall?.source) {
-      html += `
-        <div class="compare-row">
-          <div class="compare-source is-current">
-            ${currentOffer.source || 'Booking.com'} (viewing)
-          </div>
-          <div class="compare-price">${formatComparePrice(currentOffer.total, currency)}</div>
-        </div>
-      `;
-    }
 
-    // Savings calculation
-    if (cheapestOverall && currentOffer && cheapestOverall.total < currentOffer.total) {
+    // Savings calculation - suppress if mismatch detected, member-only, or not meaningful
+    const cheapestHasMemberBadge = (cheapestOverall?.badges || []).some(
+      b => ['Member', 'Login', 'Mobile'].includes(b)
+    );
+
+    if (cheapestOverall && currentOffer && cheapestOverall.total < currentOffer.total && !_currentMismatch) {
       const savings = currentOffer.total - cheapestOverall.total;
-      html += `
-        <div class="compare-savings">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-          </svg>
-          Save ${formatComparePrice(savings, currency)} vs ${currentOffer.source || 'current'}
-        </div>
-      `;
+
+      // Only show savings callout if meaningful (>=1.5% or above currency minimum)
+      if (isMeaningfulSavings(savings, currentOffer.total, currency)) {
+        if (cheapestHasMemberBadge) {
+          // Cheapest requires membership - show note instead of full savings
+          html += `
+            <div class="compare-member-note">
+              💡 Cheapest price may require membership/login
+            </div>
+          `;
+        } else {
+          html += `
+            <div class="compare-savings">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+              </svg>
+              Save ${formatComparePrice(savings, currency)} vs ${currentOffer.source || 'current'}
+            </div>
+          `;
+        }
+      }
+      // If savings are trivial, just show nothing (cleaner than a preachy message)
     }
 
     if (!html) {
@@ -1625,14 +1908,17 @@ Best regards,`;
     compareResults.innerHTML = html;
     compareTimestamp.textContent = `Checked ${formatTimestamp(data.fetchedAt)}`;
     showCompareState('results');
+    updateCompareFooter();
   }
 
   // Fetch compare data from background
-  async function fetchCompareData(forceRefresh = false) {
+  async function fetchCompareData(forceRefresh = false, opts = {}) {
     if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
       console.log('bookDirect: Chrome runtime not available for compare');
       return;
     }
+
+    const seq = ++_compareReqSeq; // Race-condition guard
 
     // Show section and loading state
     compareSection.style.display = 'block';
@@ -1643,7 +1929,10 @@ Best regards,`;
         chrome.runtime.sendMessage({
           type: forceRefresh ? 'REFRESH_COMPARE' : 'GET_COMPARE_DATA',
           officialUrl: _officialUrl,
-          forceRefresh
+          forceRefresh,
+          hotelName: _hotelName,
+          bookingUrl: window.location.href,
+          reason: opts.reason || null
         }, (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -1653,6 +1942,14 @@ Best regards,`;
         });
       });
 
+      // Race guard: ignore stale responses
+      if (seq !== _compareReqSeq) {
+        console.log('bookDirect: Ignoring stale compare response', seq, _compareReqSeq);
+        return;
+      }
+
+      _lastCompareData = response;
+
       if (response?.needsDates) {
         showCompareState('no-dates');
         return;
@@ -1660,6 +1957,13 @@ Best regards,`;
 
       if (response?.error) {
         console.warn('bookDirect: Compare API error:', response.error, response);
+
+        // Retry once for 'No page context' error (race condition on page load)
+        if (response.error.includes('No page context') && !opts._retried) {
+          console.log('bookDirect: Retrying after 500ms (waiting for page context)');
+          await new Promise(r => setTimeout(r, 500));
+          return fetchCompareData(forceRefresh, { ...opts, _retried: true });
+        }
 
         // User-friendly error messages
         let userMessage = 'Unable to compare prices.';
@@ -1669,10 +1973,13 @@ Best regards,`;
           userMessage = 'Too many requests. Please wait a moment.';
         } else if (response.error.includes('No property_token')) {
           userMessage = 'Hotel not found in price database.';
+        } else if (response.error.includes('No page context')) {
+          userMessage = 'Page not ready. Try refreshing.';
         }
 
         compareError.textContent = userMessage;
         showCompareState('error');
+        updateCompareFooter();
         return;
       }
 
@@ -1682,19 +1989,34 @@ Best regards,`;
       console.error('bookDirect: Compare fetch error', err);
       compareError.textContent = 'Unable to check prices.';
       showCompareState('error');
+      updateCompareFooter();
     }
   }
 
-  // Refresh button handler
+  // Refresh button handler with debounce and cooldown
   if (compareRefresh) {
     compareRefresh.addEventListener('click', () => {
-      fetchCompareData(true);
+      const now = Date.now();
+      if (now - _lastCompareClickAt < 1500) return; // 1.5s debounce
+      _lastCompareClickAt = now;
+
+      const isExpensive = compareRefresh.dataset.expensive === 'true';
+      if (isExpensive) {
+        _retryMatchCooldownUntil = Date.now() + 90000; // 90s cooldown
+        // Start countdown timer
+        if (!_cooldownTimer) {
+          _cooldownTimer = setInterval(() => {
+            if (Date.now() >= _retryMatchCooldownUntil) {
+              clearInterval(_cooldownTimer);
+              _cooldownTimer = null;
+            }
+            updateCompareFooter();
+          }, 1000);
+        }
+      }
+      fetchCompareData(isExpensive);
     });
   }
-
-  // Track if compare has been called (to avoid duplicates)
-  let _compareCalledOnce = false;
-  let _waitingForOfficialUrl = true;
 
   // Store officialUrl when contact lookup completes
   container.setOfficialUrl = function (url) {
@@ -1702,17 +2024,23 @@ Best regards,`;
     _waitingForOfficialUrl = false;
 
     // Notify background about the officialUrl
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({
         type: 'SET_OFFICIAL_URL',
         officialUrl: url
       });
     }
 
-    // Only trigger compare if we haven't called it yet
     if (!_compareCalledOnce) {
+      // First call - with officialUrl
       _compareCalledOnce = true;
+      _compareUsedOfficialUrl = true;
       fetchCompareData();
+    } else if (!_compareUsedOfficialUrl) {
+      // Already called without officialUrl - refresh with it (system refresh bypasses throttle)
+      _compareUsedOfficialUrl = true;
+      console.log('bookDirect: officialUrl arrived late, refreshing compare');
+      fetchCompareData(true, { reason: 'officialUrl_late' });
     }
   };
 
@@ -1721,6 +2049,7 @@ Best regards,`;
     if (_waitingForOfficialUrl && !_compareCalledOnce) {
       console.log('bookDirect: officialUrl timeout (3500ms), calling compare without it');
       _compareCalledOnce = true;
+      _compareUsedOfficialUrl = false; // Ran WITHOUT officialUrl - may need upgrade later
       fetchCompareData();
     }
   }, 3500);
