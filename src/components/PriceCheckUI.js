@@ -1673,7 +1673,7 @@ Best regards,`;
   const containerEl = shadowRoot.querySelector('.container');
   const priceLabel = shadowRoot.getElementById('price-label');
 
-  // Function to update compact mode and hero label
+  // Function to update compact mode for compare section
   function updateCompactMode(width) {
     const isCompact = width < 360;
 
@@ -1681,11 +1681,7 @@ Best regards,`;
     if (compareSection) {
       compareSection.classList.toggle('compact', isCompact);
     }
-
-    // Update hero label based on mode
-    if (priceLabel) {
-      priceLabel.textContent = isCompact ? 'Booking' : 'Booking.com (viewing)';
-    }
+    // Hero label always shows "Booking.com (viewing)" - no switching needed
   }
 
   if (containerEl) {
