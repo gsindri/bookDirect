@@ -1672,11 +1672,15 @@ Best regards,`;
   // Compact mode detection via ResizeObserver on container
   const containerEl = shadowRoot.querySelector('.container');
   const priceLabel = shadowRoot.getElementById('price-label');
-  if (containerEl && compareSection) {
+  if (containerEl) {
     const compactRO = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width || 0;
       const isCompact = w < 360;
-      compareSection.classList.toggle('compact', isCompact);
+
+      // Toggle compact class on compare section if exists
+      if (compareSection) {
+        compareSection.classList.toggle('compact', isCompact);
+      }
 
       // Shorten hero label in compact mode
       if (priceLabel) {
