@@ -30,6 +30,9 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   let _price = price;
   let _roomDetails = '';
   let _foundEmail = ''; // Discovered email from hotel website
+  let _bookDirectUrl = null; // Best URL for Book Direct button
+  let _bookDirectUrlSource = null; // 'hotelDetails' | 'compareOffer' | 'compareProperty'
+  let _selectedRooms = []; // Structured room selection: [{ name, count }]
 
   // Get icon URL (needs to be computed before template)
   const iconUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
@@ -1545,10 +1548,16 @@ Best regards,`;
 
         // Website button: Show only if website exists
         if (data.website) {
+          // Set initial _bookDirectUrl from hotelDetails (lowest priority fallback)
+          if (!_bookDirectUrl) {
+            _bookDirectUrl = data.website;
+            _bookDirectUrlSource = 'hotelDetails';
+          }
+
           // Extract domain for trust label
           let domain = '';
           try {
-            const url = new URL(data.website);
+            const url = new URL(_bookDirectUrl);
             domain = url.hostname.replace(/^www\./, '');
           } catch (e) {
             domain = '';
@@ -1557,9 +1566,11 @@ Best regards,`;
           const websiteBtn = document.createElement('button');
           websiteBtn.className = 'btn-outline';
           websiteBtn.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path d="M21.721 12.752a9.711 9.711 0 0 0-.945-5.003 12.754 12.754 0 0 1-4.339 2.708 18.991 18.991 0 0 1-.214 4.772 17.165 17.165 0 0 0 5.498-2.477ZM14.634 15.55a17.324 17.324 0 0 0 .332-4.647c-.952.227-1.945.347-2.966.347-1.021 0-2.014-.12-2.966-.347a17.515 17.515 0 0 0 .332 4.647 17.385 17.385 0 0 0 5.268 0ZM9.772 17.119a18.963 18.963 0 0 0 4.456 0A17.182 17.182 0 0 1 12 21.724a17.18 17.18 0 0 1-2.228-4.605ZM7.777 15.23a18.87 18.87 0 0 1-.214-4.774 12.753 12.753 0 0 1-4.34-2.708 9.711 9.711 0 0 0-.944 5.004 17.165 17.165 0 0 0 5.498 2.477ZM21.356 14.752a9.765 9.765 0 0 1-7.478 6.817 18.64 18.64 0 0 0 1.988-4.718 18.627 18.627 0 0 0 5.49-2.098ZM2.644 14.752c1.682.971 3.53 1.688 5.49 2.099a18.64 18.64 0 0 0 1.988 4.718 9.765 9.765 0 0 1-7.478-6.816ZM13.878 2.43a9.755 9.755 0 0 1 6.116 3.986 11.267 11.267 0 0 1-3.746 2.504 18.63 18.63 0 0 0-2.37-6.49ZM12 2.276a17.152 17.152 0 0 1 2.805 7.121c-.897.23-1.837.353-2.805.353-.968 0-1.908-.122-2.805-.353A17.151 17.151 0 0 1 12 2.276ZM10.122 2.43a18.629 18.629 0 0 0-2.37 6.49 11.266 11.266 0 0 1-3.746-2.504 9.754 9.754 0 0 1 6.116-3.985Z" /></svg> <span>Book Direct</span>`;
-          websiteBtn.title = domain ? `Go to ${domain}` : 'Go to official website';
+          websiteBtn.title = domain ? `Opens: ${domain}` : 'Go to official website';
+          // Use _bookDirectUrl at click time (dynamic, can be upgraded later)
           websiteBtn.addEventListener('click', () => {
-            window.open(data.website, '_blank');
+            if (!_bookDirectUrl) return;
+            window.open(_bookDirectUrl, '_blank', 'noopener,noreferrer');
           });
           dynamicContainer.appendChild(websiteBtn);
           hasAnyData = true;
@@ -1716,6 +1727,172 @@ Best regards,`;
     return Number.isFinite(num) && num > 0 ? num : NaN;
   }
 
+  // --- BOOK DIRECT URL HELPERS ---
+  function isHttpUrl(u) {
+    try { const x = new URL(u); return x.protocol === 'http:' || x.protocol === 'https:'; }
+    catch { return false; }
+  }
+
+  function isGoogleTrackingUrl(u) {
+    try {
+      const h = new URL(u).hostname;
+      return h.includes('google.com') || h.includes('googleadservices.com') || h.includes('googlesyndication.com');
+    } catch { return false; }
+  }
+
+  function isKnownOtaUrl(u) {
+    try {
+      const h = new URL(u).hostname.replace(/^www\./, '');
+      return ['booking.com', 'expedia.com', 'hotels.com', 'agoda.com', 'trip.com', 'priceline.com'].some(d => h === d || h.endsWith('.' + d));
+    } catch { return false; }
+  }
+
+  function hasDateParams(u) {
+    try {
+      const p = new URL(u).searchParams;
+      return p.has('checkin') || p.has('checkIn') || p.has('checkout') || p.has('checkOut') || p.has('arrival') || p.has('departure');
+    } catch { return false; }
+  }
+
+  function isValidDirectLink(u) {
+    return isHttpUrl(u) && !isGoogleTrackingUrl(u) && !isKnownOtaUrl(u);
+  }
+
+  // Pick best official URL from compare data
+  function pickBestOfficialUrl(data) {
+    if (!data) return null;
+
+    // 1. Best: Official offer deep link with date params
+    const offers = data.offers || [];
+    const officialOffers = offers.filter(o => o.isOfficial && o.link && isValidDirectLink(o.link));
+
+    // Prefer offers with date params
+    const withDates = officialOffers.filter(o => hasDateParams(o.link));
+    if (withDates.length > 0) {
+      return { url: withDates[0].link, source: 'compareOffer' };
+    }
+    if (officialOffers.length > 0) {
+      return { url: officialOffers[0].link, source: 'compareOffer' };
+    }
+
+    // 2. Fallback: property.link (homepage)
+    if (data.property?.link && isValidDirectLink(data.property.link)) {
+      return { url: data.property.link, source: 'compareProperty' };
+    }
+
+    return null;
+  }
+
+  // Update Book Direct button with new URL
+  function updateBookDirectButton(url, source) {
+    if (!url) return;
+    _bookDirectUrl = url;
+    _bookDirectUrlSource = source;
+
+    // Update button tooltip to show hostname
+    const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
+    const websiteBtn = dynamicContainer?.querySelector('.btn-outline');
+    if (websiteBtn) {
+      try {
+        const host = new URL(url).hostname.replace(/^www\./, '');
+        websiteBtn.title = `Opens: ${host}`;
+      } catch { /* ignore */ }
+    }
+
+    console.log('bookDirect: Updated _bookDirectUrl from', source, '->', url);
+  }
+
+  // --- ROOM MATCHING HELPERS ---
+  // Normalize room name for matching
+  function normRoomName(s) {
+    return String(s || '')
+      .toLowerCase()
+      .replace(/[\u2013\u2014-]/g, ' ')  // en/em dash to space
+      .replace(/[^a-z0-9]+/g, ' ')       // non-alphanumeric to space
+      .replace(/\b(with|and|or|the|a|an)\b/g, '') // remove stopwords
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Score room name similarity (token overlap)
+  function roomScore(selectedName, offerRoomName) {
+    const aTokens = normRoomName(selectedName).split(' ').filter(Boolean);
+    const bTokens = new Set(normRoomName(offerRoomName).split(' ').filter(Boolean));
+    if (!aTokens.length) return 0;
+    const hits = aTokens.filter(t => bTokens.has(t)).length;
+    return hits / aTokens.length;
+  }
+
+  // Find best room match across all offers
+  function findBestRoomMatch(offers, selectedRoomName) {
+    let best = null;
+    for (const offer of (offers || [])) {
+      for (const room of (offer.rooms || [])) {
+        const score = roomScore(selectedRoomName, room.name);
+        if (!best || score > best.score) {
+          best = { score, offer, room };
+        }
+      }
+    }
+    // Threshold: require at least 50% token overlap
+    return best && best.score >= 0.5 ? best : null;
+  }
+
+  // Compute room-aware comparison data
+  function computeRoomAwareComparison(data) {
+    const totalSelectedRooms = (_selectedRooms || []).reduce((s, r) => s + (r.count || 0), 0);
+    const singleSelection = totalSelectedRooms === 1 ? _selectedRooms[0] : null;
+
+    // Multi-room: check if all selected rooms are the same type
+    let multiRoomSameName = null;
+    if (totalSelectedRooms > 1 && _selectedRooms.length > 0) {
+      const firstNorm = normRoomName(_selectedRooms[0].name);
+      const allSame = _selectedRooms.every(r => normRoomName(r.name) === firstNorm);
+      if (allSame) {
+        multiRoomSameName = _selectedRooms[0].name;
+      }
+    }
+
+    // Single room selection
+    if (singleSelection) {
+      const match = findBestRoomMatch(data.offers, singleSelection.name);
+      if (match) {
+        return {
+          type: 'matched',
+          selectedName: singleSelection.name,
+          matchedRoom: match.room,
+          matchedOffer: match.offer,
+          matchedTotal: match.room.total,
+          confidence: match.score,
+        };
+      }
+    }
+
+    // Multi-room same type: multiply matched room total
+    if (multiRoomSameName) {
+      const match = findBestRoomMatch(data.offers, multiRoomSameName);
+      if (match) {
+        return {
+          type: 'matched-multi',
+          selectedName: multiRoomSameName,
+          roomCount: totalSelectedRooms,
+          matchedRoom: match.room,
+          matchedOffer: match.offer,
+          matchedTotal: match.room.total * totalSelectedRooms,
+          confidence: match.score,
+        };
+      }
+    }
+
+    // Multi-room different types: can't match
+    if (totalSelectedRooms > 1) {
+      return { type: 'multi-room-unmatchable', roomCount: totalSelectedRooms };
+    }
+
+    // No selection or no match: fall back to cheapest overall
+    return { type: 'fallback' };
+  }
+
   // Helper: Format timestamp
   function formatTimestamp(isoString) {
     if (!isoString) return '';
@@ -1831,6 +2008,13 @@ Best regards,`;
 
     _currentMismatch = mismatchCheck.isMismatch || isLowConfidence || data.matchUncertain;
 
+    // --- UPGRADE BOOK DIRECT URL ---
+    // Try to find a better official link from compare data (deep link > homepage > hotelDetails)
+    const betterUrl = pickBestOfficialUrl(data);
+    if (betterUrl && betterUrl.url !== _bookDirectUrl) {
+      updateBookDirectButton(betterUrl.url, betterUrl.source);
+    }
+
     const currency = data.query?.currency || 'USD';
     const { cheapestOverall, cheapestOfficial, currentOtaOffer, bookingOffer } = data;
 
@@ -1903,23 +2087,39 @@ Best regards,`;
     // Google's Booking.com price from compare data
     const googleBookingTotal = bookingOffer?.total ?? currentOtaOffer?.total ?? null;
 
-    // Choose baseline conservatively - use the LOWER of the two to never overstate savings
+    // --- ROOM-AWARE COMPARISON ---
+    const roomComparison = computeRoomAwareComparison(data);
+    console.log('bookDirect: Room comparison:', roomComparison);
+
+    // Choose baseline - prefer room-matched comparison when available
     let baselineTotal = null;
     let baselineLabel = 'Booking.com';
+    let roomNote = '';
 
-    if (Number.isFinite(viewingTotal) && Number.isFinite(googleBookingTotal)) {
-      // Both exist - use the lower one (conservative, never overstate)
-      baselineTotal = Math.min(viewingTotal, googleBookingTotal);
-    } else if (Number.isFinite(viewingTotal)) {
-      // Only page price available
-      baselineTotal = viewingTotal;
-      baselineLabel = 'Booking.com';
-    } else if (Number.isFinite(googleBookingTotal)) {
-      // Only Google price available
-      baselineTotal = googleBookingTotal;
-      baselineLabel = 'Booking.com';
+    if (roomComparison.type === 'multi-room-unmatchable') {
+      // Multi-room with different types: can't compare accurately
+      html += `
+        <div class="compare-room-note">
+          ℹ️ Multi-room selection – savings shown for cheapest room
+        </div>
+      `;
     }
 
+    // Use page price as baseline (what user is actually paying)
+    if (Number.isFinite(viewingTotal) && Number.isFinite(googleBookingTotal)) {
+      // Both exist - use the VIEWING price (what user selected) for user-centric comparison
+      baselineTotal = viewingTotal;
+    } else if (Number.isFinite(viewingTotal)) {
+      baselineTotal = viewingTotal;
+    } else if (Number.isFinite(googleBookingTotal)) {
+      baselineTotal = googleBookingTotal;
+    }
+
+    // Room match feedback
+    if (roomComparison.type === 'matched' || roomComparison.type === 'matched-multi') {
+      const roomName = roomComparison.matchedRoom?.name || roomComparison.selectedName;
+      roomNote = roomName ? ` (${roomName.slice(0, 30)}${roomName.length > 30 ? '...' : ''})` : '';
+    }
 
     if (cheapestOverall && baselineTotal && cheapestOverall.total < baselineTotal && !_currentMismatch) {
       const savings = baselineTotal - cheapestOverall.total;
@@ -1939,7 +2139,7 @@ Best regards,`;
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
               </svg>
-              Save ${formatComparePrice(savings, currency)} vs ${baselineLabel}
+              Save ${formatComparePrice(savings, currency)} vs your selection
             </div>
           `;
         }
@@ -2137,12 +2337,28 @@ Best regards,`;
             amountEl.style.color = '#0a8a1f'; // Back to green
           }, 500);
         }
+
+        // LIVE RECOMPUTE: Re-render compare section with updated baseline (no API call)
+        if (_lastCompareData && !_lastCompareData.error && !_lastCompareData.needsDates) {
+          renderCompareResults(_lastCompareData);
+          console.log('bookDirect: Recomputed savings with new price:', newPrice);
+        }
       }
     }
   };
 
   container.updateDetails = function (details) {
     _roomDetails = details;
+  };
+
+  // Update structured room selection (for room-aware matching)
+  container.updateSelectedRooms = function (rooms) {
+    _selectedRooms = Array.isArray(rooms) ? rooms : [];
+    // Re-render compare section with new room context (no API call)
+    if (_lastCompareData && !_lastCompareData.error && !_lastCompareData.needsDates) {
+      renderCompareResults(_lastCompareData);
+      console.log('bookDirect: Recomputed savings with room selection:', _selectedRooms);
+    }
   };
 
   return container;

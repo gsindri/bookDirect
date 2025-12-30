@@ -1692,6 +1692,30 @@
             return details.join('\n');
         }
 
+        // --- STRUCTURED ROOM SELECTION ---
+        // Returns array of { name, count } for room-aware matching
+        function getSelectedRooms() {
+            const selects = document.querySelectorAll('select[name^="hprt_nos_select"], .hprt-nos-select');
+            const rooms = [];
+
+            selects.forEach(select => {
+                const count = parseInt(select.value, 10) || 0;
+                if (!count) return;
+
+                const row = select.closest('tr');
+                const nameEl =
+                    row?.querySelector('.hprt-roomtype-icon-link') ||
+                    row?.querySelector('.hprt-roomtype-link') ||
+                    row?.querySelector('[data-testid="room-name"]') ||
+                    row?.querySelector('.hprt-roomtype-name');
+
+                const roomName = nameEl?.innerText?.trim() || 'Room';
+                rooms.push({ name: roomName, count });
+            });
+
+            return rooms;
+        }
+
         // Observer on the SCOPE (Broader watch)
         if (app && app.updatePrice) {
             const observer = new MutationObserver(() => {
@@ -1701,12 +1725,20 @@
                 // ALSO Update Details
                 const currentDetails = getRoomDetails();
                 if (app.updateDetails) app.updateDetails(currentDetails);
+
+                // Update structured room selection for room-aware matching
+                if (app.updateSelectedRooms) {
+                    app.updateSelectedRooms(getSelectedRooms());
+                }
             });
             observer.observe(scope, { subtree: true, childList: true, characterData: true, attributes: true });
 
             // Initial Call
             const initialDetails = getRoomDetails();
             if (app.updateDetails) app.updateDetails(initialDetails);
+            if (app.updateSelectedRooms) {
+                app.updateSelectedRooms(getSelectedRooms());
+            }
         }
 
         return true;

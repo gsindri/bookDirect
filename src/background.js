@@ -139,6 +139,9 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
         url.searchParams.set('debug', '1');
     }
 
+    // Always request room-level pricing for room-aware savings
+    url.searchParams.set('includeRooms', '1');
+
     console.log('bookDirect: Fetching /compare', url.toString());
 
     try {
