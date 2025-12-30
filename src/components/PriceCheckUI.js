@@ -1669,6 +1669,24 @@ Best regards,`;
   let _retryMatchCooldownUntil = 0;
   let _cooldownTimer = null;
   let _lastCompareClickAt = 0;      // Click debounce
+  let _compareRerenderTimer = null; // Debounced rerender for room/price changes
+  let _compareInFlight = false;     // Guard against rerender during fetch
+
+  // Debounced rerender for room/price changes (avoids rapid fire during room selection)
+  function scheduleCompareRerender() {
+    if (!_lastCompareData || !compareResults) return;
+    if (_compareInFlight) return; // Don't rerender during fetch
+
+    if (_compareRerenderTimer) clearTimeout(_compareRerenderTimer);
+    _compareRerenderTimer = setTimeout(() => {
+      try {
+        renderCompareResults(_lastCompareData);
+        console.log('bookDirect: Debounced rerender complete');
+      } catch (e) {
+        console.error('bookDirect: Rerender error', e);
+      }
+    }, 180);
+  }
 
   // Get DOM elements for compare section
   const compareSection = shadowRoot.getElementById('compare-section');
@@ -2338,11 +2356,8 @@ Best regards,`;
           }, 500);
         }
 
-        // LIVE RECOMPUTE: Re-render compare section with updated baseline (no API call)
-        if (_lastCompareData && !_lastCompareData.error && !_lastCompareData.needsDates) {
-          renderCompareResults(_lastCompareData);
-          console.log('bookDirect: Recomputed savings with new price:', newPrice);
-        }
+        // LIVE RECOMPUTE: Schedule debounced re-render with updated baseline
+        scheduleCompareRerender();
       }
     }
   };
@@ -2354,11 +2369,8 @@ Best regards,`;
   // Update structured room selection (for room-aware matching)
   container.updateSelectedRooms = function (rooms) {
     _selectedRooms = Array.isArray(rooms) ? rooms : [];
-    // Re-render compare section with new room context (no API call)
-    if (_lastCompareData && !_lastCompareData.error && !_lastCompareData.needsDates) {
-      renderCompareResults(_lastCompareData);
-      console.log('bookDirect: Recomputed savings with room selection:', _selectedRooms);
-    }
+    // Schedule debounced re-render with new room context
+    scheduleCompareRerender();
   };
 
   return container;
