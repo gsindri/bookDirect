@@ -1698,6 +1698,17 @@ Best regards,`;
     return `${currency}\u00A0${formatted}`;  // NBSP between currency and number
   }
 
+  // Helper: Parse price string to number (robust for various formats)
+  // Handles: "ISK 25,103", "25.103 ISK", "€ 450", "$1,234.56"
+  function parseCurrencyNumber(priceStr) {
+    if (!priceStr || typeof priceStr !== 'string') return NaN;
+    // For whole number currencies (ISK, JPY, KRW, etc.), strip everything except digits
+    // This handles both "25,103" (comma as thousands) and "25.103" (period as thousands)
+    const digitsOnly = priceStr.replace(/[^\d]/g, '');
+    const num = parseInt(digitsOnly, 10);
+    return Number.isFinite(num) && num > 0 ? num : NaN;
+  }
+
   // Helper: Format timestamp
   function formatTimestamp(isoString) {
     if (!isoString) return '';
@@ -1874,16 +1885,44 @@ Best regards,`;
     // NOTE: Removed duplicate 'Booking.com (viewing)' row - already shown in hero section above
     const currentOffer = currentOtaOffer || bookingOffer;
 
-    // Savings calculation - suppress if mismatch detected, member-only, or not meaningful
+    // Savings calculation - use PAGE price as baseline (what user is actually paying)
+    // Suppress if mismatch detected, member-only, or not meaningful
     const cheapestHasMemberBadge = (cheapestOverall?.badges || []).some(
       b => ['Member', 'Login', 'Mobile'].includes(b)
     );
 
-    if (cheapestOverall && currentOffer && cheapestOverall.total < currentOffer.total && !_currentMismatch) {
-      const savings = currentOffer.total - cheapestOverall.total;
+    // Parse the visible page price (hero price the user sees)
+    const viewingTotal = parseCurrencyNumber(_price);
+    // Google's Booking.com price from compare data
+    const googleBookingTotal = bookingOffer?.total ?? currentOtaOffer?.total ?? null;
+
+    // Choose baseline conservatively - use the LOWER of the two to never overstate savings
+    let baselineTotal = null;
+    let baselineLabel = 'Booking.com';
+
+    if (Number.isFinite(viewingTotal) && Number.isFinite(googleBookingTotal)) {
+      // Both exist - use the lower one (conservative, never overstate)
+      baselineTotal = Math.min(viewingTotal, googleBookingTotal);
+      baselineLabel = (baselineTotal === viewingTotal) ? 'Booking.com' : 'Booking.com (Google)';
+    } else if (Number.isFinite(viewingTotal)) {
+      // Only page price available
+      baselineTotal = viewingTotal;
+      baselineLabel = 'Booking.com';
+    } else if (Number.isFinite(googleBookingTotal)) {
+      // Only Google price available
+      baselineTotal = googleBookingTotal;
+      baselineLabel = 'Booking.com';
+    }
+
+    // Check if prices differ significantly (Genius/loyalty discount)
+    const pricesDiffer = Number.isFinite(viewingTotal) && Number.isFinite(googleBookingTotal) &&
+      Math.abs(viewingTotal - googleBookingTotal) / Math.max(viewingTotal, googleBookingTotal) > 0.03;
+
+    if (cheapestOverall && baselineTotal && cheapestOverall.total < baselineTotal && !_currentMismatch) {
+      const savings = baselineTotal - cheapestOverall.total;
 
       // Only show savings callout if meaningful (>=1.5% or above currency minimum)
-      if (isMeaningfulSavings(savings, currentOffer.total, currency)) {
+      if (isMeaningfulSavings(savings, baselineTotal, currency)) {
         if (cheapestHasMemberBadge) {
           // Cheapest requires membership - show note instead of full savings
           html += `
@@ -1897,9 +1936,17 @@ Best regards,`;
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
               </svg>
-              Save ${formatComparePrice(savings, currency)} vs ${currentOffer.source || 'current'}
+              Save ${formatComparePrice(savings, currency)} vs ${baselineLabel}
             </div>
           `;
+          // If prices differ, add a small note about Genius/loyalty
+          if (pricesDiffer) {
+            html += `
+              <div class="compare-price-note" style="font-size: 11px; color: #6b7280; margin-top: 4px; padding-left: 20px;">
+                ℹ️ Google Hotels may not include Genius/loyalty discounts
+              </div>
+            `;
+          }
         }
       }
       // If savings are trivial, just show nothing (cleaner than a preachy message)
