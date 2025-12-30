@@ -1914,9 +1914,6 @@ Best regards,`;
       baselineLabel = 'Booking.com';
     }
 
-    // Check if prices differ significantly (Genius/loyalty discount)
-    const pricesDiffer = Number.isFinite(viewingTotal) && Number.isFinite(googleBookingTotal) &&
-      Math.abs(viewingTotal - googleBookingTotal) / Math.max(viewingTotal, googleBookingTotal) > 0.03;
 
     if (cheapestOverall && baselineTotal && cheapestOverall.total < baselineTotal && !_currentMismatch) {
       const savings = baselineTotal - cheapestOverall.total;
@@ -1939,14 +1936,6 @@ Best regards,`;
               Save ${formatComparePrice(savings, currency)} vs ${baselineLabel}
             </div>
           `;
-          // If prices differ, add a small note about Genius/loyalty
-          if (pricesDiffer) {
-            html += `
-              <div class="compare-price-note" style="font-size: 11px; color: #6b7280; margin-top: 4px; padding-left: 20px;">
-                ℹ️ Google Hotels may not include Genius/loyalty discounts
-              </div>
-            `;
-          }
         }
       }
       // If savings are trivial, just show nothing (cleaner than a preachy message)
