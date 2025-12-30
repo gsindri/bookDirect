@@ -1968,7 +1968,13 @@ Best regards,`;
         // User-friendly error messages
         let userMessage = 'Unable to compare prices.';
         if (response.error.includes('google_hotels failed')) {
-          userMessage = 'Price data temporarily unavailable. Try refreshing.';
+          // Check if it's "no results" vs actual API failure
+          const detailsStr = JSON.stringify(response.details || '').toLowerCase();
+          if (detailsStr.includes("didn't return any results") || detailsStr.includes('no results')) {
+            userMessage = 'Hotel not found in Google Hotels database.';
+          } else {
+            userMessage = 'Price data temporarily unavailable. Try refreshing.';
+          }
         } else if (response.error.includes('Rate limit')) {
           userMessage = 'Too many requests. Please wait a moment.';
         } else if (response.error.includes('No property_token')) {
