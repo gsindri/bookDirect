@@ -1903,7 +1903,6 @@ Best regards,`;
     if (Number.isFinite(viewingTotal) && Number.isFinite(googleBookingTotal)) {
       // Both exist - use the lower one (conservative, never overstate)
       baselineTotal = Math.min(viewingTotal, googleBookingTotal);
-      baselineLabel = (baselineTotal === viewingTotal) ? 'Booking.com' : 'Booking.com (Google)';
     } else if (Number.isFinite(viewingTotal)) {
       // Only page price available
       baselineTotal = viewingTotal;
