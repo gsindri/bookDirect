@@ -1672,22 +1672,33 @@ Best regards,`;
   // Compact mode detection via ResizeObserver on container
   const containerEl = shadowRoot.querySelector('.container');
   const priceLabel = shadowRoot.getElementById('price-label');
+
+  // Function to update compact mode and hero label
+  function updateCompactMode(width) {
+    const isCompact = width < 360;
+
+    // Toggle compact class on compare section if exists
+    if (compareSection) {
+      compareSection.classList.toggle('compact', isCompact);
+    }
+
+    // Update hero label based on mode
+    if (priceLabel) {
+      priceLabel.textContent = isCompact ? 'Booking' : 'Booking.com (viewing)';
+    }
+  }
+
   if (containerEl) {
     const compactRO = new ResizeObserver(entries => {
       const w = entries[0]?.contentRect?.width || 0;
-      const isCompact = w < 360;
-
-      // Toggle compact class on compare section if exists
-      if (compareSection) {
-        compareSection.classList.toggle('compact', isCompact);
-      }
-
-      // Shorten hero label in compact mode
-      if (priceLabel) {
-        priceLabel.textContent = isCompact ? 'Booking' : 'Booking.com (viewing)';
-      }
+      updateCompactMode(w);
     });
     compactRO.observe(containerEl);
+
+    // Also do an immediate check on the next frame (after layout)
+    requestAnimationFrame(() => {
+      updateCompactMode(containerEl.offsetWidth);
+    });
   }
 
   // Helper: Format price with currency (uses NBSP to prevent line breaks)
