@@ -1459,6 +1459,17 @@
         }
     }
 
+    // Listen for messages from background to resend page context
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            if (message.type === 'RESEND_PAGE_CONTEXT') {
+                console.log('bookDirect: Resending page context on request');
+                sendPageContext();
+                sendResponse({ sent: true });
+            }
+        });
+    }
+
     // --- STRATEGY 1: SEARCH PAGE (Floating UI) ---
     function handleSearchPage() {
         if (document.getElementById('hp_hotel_name')) return false;

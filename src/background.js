@@ -413,6 +413,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const context = tabId ? tabContexts.get(tabId) : null;
 
         if (!context) {
+            // Request content script to resend page context (it may have been lost on extension reload)
+            if (tabId) {
+                console.log('bookDirect: No page context, requesting resend from tab', tabId);
+                chrome.tabs.sendMessage(tabId, { type: 'RESEND_PAGE_CONTEXT' }).catch(() => { });
+            }
             sendResponse({ error: 'No page context available' });
             return false;
         }
