@@ -2095,11 +2095,14 @@ Best regards,`;
     const coverage = aTokens.length > 0 ? hits / aTokens.length : 0;
 
     // Strong disambiguators only
-    const keyTokens = ['airport', 'station', 'beach', 'downtown', 'central', 'centre', 'oldtown', 'harbor', 'harbour'];
+    const keyTokens = ['airport', 'station', 'beach', 'downtown', 'central', 'centre', 'oldtown', 'harbor', 'harbour', 'comfort', 'clarion', 'quality', 'scandic', 'radisson', 'marriott', 'hilton', 'sheraton', 'hyatt'];
     const aKeyTokens = keyTokens.filter(k => a.includes(k));
     const missingKeyTokens = aKeyTokens.filter(k => !b.includes(k));
 
-    return { isMismatch: coverage < 0.4 || missingKeyTokens.length > 0, matchedName };
+    // If one has a key token that the other lacks, it's a mismatch
+    // Also mismatch if "airport" is in one and not other (handled above)
+    // Low coverage (< 0.5) is also a strong signal
+    return { isMismatch: coverage < 0.5 || missingKeyTokens.length > 0, matchedName };
   }
 
   // --- MEANINGFUL SAVINGS THRESHOLD ---
@@ -2223,6 +2226,10 @@ Best regards,`;
           ⚠️ Prices may be for: <strong>${matchedHotelName}</strong>
         </div>
       `;
+
+      // CRITICAL: If mismatch is detected, do NOT treat this as a valid "cheaper" offer
+      // This prevents misleading "Cheaper" badges on wrong hotels
+      cheapestOverall = null;
     }
 
     // --- ROOM-AWARE COMPARISON (moved earlier to use in cheapest display) ---
