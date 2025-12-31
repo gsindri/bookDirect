@@ -729,6 +729,11 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         font-size: 12px;
       }
 
+      .compare-badge.booking-best {
+        background: rgba(34, 197, 94, 0.12);
+        color: #16a34a;
+      }
+
       .compare-savings {
         display: flex;
         align-items: center;
@@ -2224,6 +2229,10 @@ Best regards,`;
     const roomComparison = computeRoomAwareComparison(data);
     console.log('bookDirect: Room comparison:', roomComparison);
 
+    // Parse the visible page price EARLY (needed for smart badge display)
+    const viewingTotal = parseCurrencyNumber(_price);
+    console.log('bookDirect: Page price for comparison:', { _price, viewingTotal });
+
     // Determine what to show as "cheapest" - room-matched price vs overall cheapest
     const isRoomMatched = roomComparison.type === 'matched' || roomComparison.type === 'matched-multi';
 
@@ -2242,19 +2251,38 @@ Best regards,`;
         ? `<a href="${displayLink}" target="_blank" rel="noopener">${formatComparePrice(displayTotal, currency)}</a>`
         : formatComparePrice(displayTotal, currency);
 
-      // Build badges array
+      // Determine if this is actually cheaper than what user is paying on Booking.com
+      const isActuallyCheaper = Number.isFinite(viewingTotal) &&
+        Number.isFinite(displayTotal) &&
+        displayTotal < viewingTotal;
+      const bookingIsBest = Number.isFinite(viewingTotal) &&
+        Number.isFinite(displayTotal) &&
+        viewingTotal <= displayTotal;
+
+      // Build badges array - only show "Cheaper" if actually cheaper than Booking.com!
       const badges = [];
       if (isRoomMatched) {
         badges.push('<span class="compare-badge matched">Same Room</span>');
       }
-      badges.push('<span class="compare-badge cheapest">Cheapest</span>');
+
+      if (isActuallyCheaper) {
+        // This offer IS cheaper than Booking.com
+        badges.push('<span class="compare-badge cheapest">Cheaper</span>');
+      } else if (bookingIsBest) {
+        // Booking.com is same or better - highlight that
+        badges.push('<span class="compare-badge booking-best">Booking Best</span>');
+      }
+
       for (const b of (displayOffer?.badges || [])) {
         badges.push(`<span class="compare-badge ${b.toLowerCase()}">${b}</span>`);
       }
 
+      // Only highlight as cheapest (green) if it actually IS cheaper
+      const sourceClass = isActuallyCheaper ? 'compare-source is-cheapest' : 'compare-source';
+
       html += `
         <div class="compare-row">
-          <div class="compare-source is-cheapest" title="${sourceLabel}${roomLabel}">${sourceLabel}</div>
+          <div class="${sourceClass}" title="${sourceLabel}${roomLabel}">${sourceLabel}</div>
           <div class="compare-price">${priceLink}</div>
           <div class="compare-tags">${badges.join('')}</div>
         </div>
@@ -2307,8 +2335,7 @@ Best regards,`;
       b => ['Member', 'Login', 'Mobile'].includes(b)
     );
 
-    // Parse the visible page price (hero price the user sees)
-    const viewingTotal = parseCurrencyNumber(_price);
+    // viewingTotal already parsed earlier at line 2228
     // Google's Booking.com price from compare data
     const googleBookingTotal = bookingOffer?.total ?? currentOtaOffer?.total ?? null;
 
