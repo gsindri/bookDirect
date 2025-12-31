@@ -5,14 +5,13 @@
     "description": "Helps users on Booking.com by injecting a 'Price Check' UI.",
     "permissions": [
         "activeTab",
-        "scripting",
         "clipboardWrite",
         "storage"
     ],
     "host_permissions": [
-        "*://*.booking.com/*",
-        "https://hotelfinder.gsindrih.workers.dev/*",
-        "<all_urls>"
+        "*://*.booking.com/hotel/*",
+        "*://*.booking.com/searchresults*",
+        "https://hotelfinder.gsindrih.workers.dev/*"
     ],
     "background": {
         "service_worker": "src/background.js"
@@ -20,13 +19,23 @@
     "content_scripts": [
         {
             "matches": [
-                "*://*.booking.com/*"
+                "*://*.booking.com/searchresults*"
+            ],
+            "js": [
+                "src/searchPrefetch.js"
+            ],
+            "run_at": "document_start"
+        },
+        {
+            "matches": [
+                "*://*.booking.com/hotel/*"
             ],
             "js": [
                 "src/components/OverflowDiagnostics.js",
                 "src/components/PriceCheckUI.js",
                 "src/content.js"
-            ]
+            ],
+            "run_at": "document_start"
         }
     ],
     "action": {
@@ -48,7 +57,7 @@
                 "icons/bookDirect_icon1.png"
             ],
             "matches": [
-                "*://*.booking.com/*"
+                "https://*.booking.com/*"
             ]
         }
     ]

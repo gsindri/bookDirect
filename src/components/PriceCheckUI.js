@@ -25,6 +25,21 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
 
   const shadowRoot = container.attachShadow({ mode: 'closed' });
 
+  // ========================================
+  // ESCAPE HELPERS (XSS prevention)
+  // ========================================
+  const _ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  function escHtml(s) { return String(s ?? "").replace(/[&<>"']/g, ch => _ESC_MAP[ch]); }
+  function escAttr(s) { return escHtml(s).replace(/`/g, "&#96;"); }
+  function safeClassToken(s) { return String(s ?? "").toLowerCase().replace(/[^a-z0-9_-]/g, ""); }
+  function safeHttpUrl(raw) {
+    try {
+      const u = new URL(String(raw));
+      if (u.protocol === "http:" || u.protocol === "https:") return u.toString();
+    } catch { }
+    return null;
+  }
+
   // Internal state
   let _hotelName = hotelName;
   let _price = price;
@@ -816,12 +831,12 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             </div>
             <div class="content">
             <!-- Hotel Name (Hero) -->
-            <div class="hotel-name" title="${_hotelName}">${_hotelName}</div>
+            <div class="hotel-name" id="bd-hotel-name"></div>
             
             <!-- Price (Hero) -->
             <div class="price-row">
               <span id="price-label" class="price-label" title="Booking.com price you're viewing">Booking.com (viewing)</span>
-              <span class="price-value" id="price-display">${_price}</span>
+              <span class="price-value" id="price-display"></span>
             </div>
             
             <!-- Error Tooltip -->
@@ -909,7 +924,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     }
   }
 
-  // Format price with separate currency and amount
+  // Format price with separate currency and amount (DOM-based, XSS-safe)
   const priceDisplay = shadowRoot.getElementById('price-display');
   if (priceDisplay && _price) {
     // Parse currency and amount from price string (e.g., "ISK 67,730" or "€ 450")
@@ -917,12 +932,22 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     const match = priceStr.match(/^([A-Z]{2,3}|[€$£¥₹])\s*(.+)$/i) ||
       priceStr.match(/^(.+?)\s*([A-Z]{2,3})$/i);
 
+    priceDisplay.textContent = "";
     if (match) {
       const [, currency, amount] = match;
-      priceDisplay.innerHTML = `<span class="price-currency">${currency}</span><span class="price-amount">${amount}</span>`;
+      const cur = document.createElement("span");
+      cur.className = "price-currency";
+      cur.textContent = currency;
+      const amt = document.createElement("span");
+      amt.className = "price-amount";
+      amt.textContent = amount;
+      priceDisplay.append(cur, amt);
     } else {
       // Fallback: just style the whole thing as amount
-      priceDisplay.innerHTML = `<span class="price-amount">${priceStr}</span>`;
+      const amt = document.createElement("span");
+      amt.className = "price-amount";
+      amt.textContent = priceStr;
+      priceDisplay.append(amt);
     }
   }
 
@@ -1602,12 +1627,18 @@ Best regards,`;
           }
         }
 
-        // Phone link: Show only if phone exists
+        // Phone link: Show only if phone exists (DOM-based, XSS-safe)
         if (data.phone) {
           const phoneLink = document.createElement('a');
           phoneLink.className = 'phone-link';
-          phoneLink.href = `tel:${data.phone.replace(/\s/g, '')}`;
-          phoneLink.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clip-rule="evenodd" /></svg> ${data.phone}`;
+          // Sanitize href: only allow digits and basic phone chars
+          const sanitizedPhone = String(data.phone).replace(/[^\d+\-()\s]/g, '');
+          phoneLink.href = `tel:${sanitizedPhone.replace(/\s/g, '')}`;
+          // Use innerHTML for static SVG only, then add text via DOM
+          phoneLink.innerHTML = `<svg class="bd-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style="color: #003580;" aria-hidden="true"><path fill-rule="evenodd" d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5Z" clip-rule="evenodd" /></svg> <span class="bd-phone"></span>`;
+          // Set phone text via textContent (safe from injection)
+          const phoneSpan = phoneLink.querySelector('.bd-phone');
+          if (phoneSpan) phoneSpan.textContent = data.phone;
           dynamicContainer.appendChild(phoneLink);
           hasAnyData = true;
         }
@@ -1747,53 +1778,77 @@ Best regards,`;
     });
   }
 
+  // ========================================
+  // MONEY PARSING + FORMATTING
+  // ========================================
+  const ZERO_DECIMAL_CURRENCIES = new Set(["ISK", "JPY", "KRW", "VND", "CLP"]);
+
   // Helper: Format price with currency (uses NBSP to prevent line breaks)
+  // Shows decimals for USD/EUR/GBP, none for ISK/JPY/KRW
   function formatComparePrice(total, currency) {
-    if (total == null) return '—';
-    const formatted = total.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-    if (!currency) return formatted;
-    return `${currency}\u00A0${formatted}`;  // NBSP between currency and number
+    if (total == null || !Number.isFinite(total)) return '—';
+    const c = (currency || "").trim().toUpperCase();
+    const maxFrac = ZERO_DECIMAL_CURRENCIES.has(c) ? 0 : 2;
+    const formatted = Number(total).toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: maxFrac
+    });
+    return c ? `${c}\u00A0${formatted}` : formatted;
   }
 
-  // Helper: Parse price string to number (robust for various formats)
-  // Handles: "ISK 25,103", "25.103 ISK", "€ 450", "$1,234.56"
-  function parseCurrencyNumber(priceStr) {
-    if (!priceStr || typeof priceStr !== 'string') return NaN;
-    // For whole number currencies (ISK, JPY, KRW, etc.), strip everything except digits
-    // This handles both "25,103" (comma as thousands) and "25.103" (period as thousands)
-    const digitsOnly = priceStr.replace(/[^\d]/g, '');
-    const num = parseInt(digitsOnly, 10);
-    return Number.isFinite(num) && num > 0 ? num : NaN;
+  // Helper: Parse price string to number (locale-aware, handles decimals correctly)
+  // Handles: "$1,234.56" -> 1234.56, "€ 1.234,56" -> 1234.56, "ISK 25,103" -> 25103
+  function parseMoneyToNumber(val) {
+    if (val == null) return NaN;
+    if (typeof val === "number" && Number.isFinite(val)) return val;
+
+    const s = String(val).trim();
+    if (!s) return NaN;
+
+    // Keep digits, comma, dot, minus. Remove currency symbols and spaces.
+    let cleaned = s.replace(/[^\d.,-]/g, "").replace(/\s+/g, "");
+    if (!cleaned) return NaN;
+
+    const lastDot = cleaned.lastIndexOf(".");
+    const lastComma = cleaned.lastIndexOf(",");
+    let normalized = cleaned;
+
+    // If both exist, the last one is probably the decimal separator.
+    if (lastDot !== -1 && lastComma !== -1) {
+      if (lastDot > lastComma) {
+        // dot decimal, commas thousands (e.g., "1,234.56")
+        normalized = cleaned.replace(/,/g, "");
+      } else {
+        // comma decimal, dots thousands (e.g., "1.234,56")
+        normalized = cleaned.replace(/\./g, "").replace(/,/g, ".");
+      }
+    } else if (lastComma !== -1) {
+      // Only comma
+      const digitsAfter = cleaned.length - lastComma - 1;
+      if (digitsAfter === 2) {
+        // Likely decimal (e.g., "1234,56")
+        normalized = cleaned.replace(/,/g, ".");
+      } else {
+        // Likely thousands (e.g., "1,234")
+        normalized = cleaned.replace(/,/g, "");
+      }
+    } else if (lastDot !== -1) {
+      // Only dot
+      const digitsAfter = cleaned.length - lastDot - 1;
+      if (digitsAfter === 2) {
+        // Likely decimal (e.g., "1234.56")
+        normalized = cleaned;
+      } else {
+        // Likely thousands (e.g., "1.234")
+        normalized = cleaned.replace(/\./g, "");
+      }
+    }
+
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : NaN;
   }
 
-  // --- ROOM MATCHING HELPERS (for like-for-like comparison) ---
-
-  // Parse selected rooms from _roomDetails string (e.g., "2 x Deluxe Double Room • 1 x Suite")
-  function parseSelectedRoomsFromDetails(details) {
-    if (!details || typeof details !== 'string') return [];
-
-    return details
-      .split('•')
-      .map(s => s.trim())
-      .map(part => {
-        const m = part.match(/^(\d+)\s*x\s*(.+)$/i);
-        if (!m) return null;
-
-        const count = parseInt(m[1], 10) || 1;
-        let name = (m[2] || '').trim();
-
-        // Remove trailing "(~ISK 12,345)" price annotation
-        name = name.replace(/\(\s*~[^)]*\)\s*$/i, '').trim();
-        // Remove "(Breakfast included)" suffix
-        name = name.replace(/\(Breakfast included\)/i, '').trim();
-        // Normalize whitespace
-        name = name.replace(/\s+/g, ' ').trim();
-
-        if (!name) return null;
-        return { count, name };
-      })
-      .filter(Boolean);
-  }
+    // --- ROOM MATCHING HELPERS (for like-for-like comparison) ---
 
   // Normalize room name for fuzzy matching
   function normalizeRoomName(name) {
@@ -1804,6 +1859,19 @@ Best regards,`;
       .replace(/\b(room|rooms|the|and|or|with|without|a|an|of|to|in)\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  // Merge duplicate room selections by normalized name
+  function mergeSelections(selections) {
+    const map = new Map();
+    for (const s of selections) {
+      const key = normalizeRoomName(s.name);
+      if (!key) continue;
+      const prev = map.get(key);
+      if (prev) prev.count += s.count;
+      else map.set(key, { ...s });
+    }
+    return [...map.values()];
   }
 
   // Jaccard similarity score between two room names
@@ -1967,100 +2035,7 @@ Best regards,`;
     console.log('bookDirect: Updated _bookDirectUrl from', source, '->', url);
   }
 
-  // --- ROOM MATCHING HELPERS ---
-  // Normalize room name for matching
-  function normRoomName(s) {
-    return String(s || '')
-      .toLowerCase()
-      .replace(/[\u2013\u2014-]/g, ' ')  // en/em dash to space
-      .replace(/[^a-z0-9]+/g, ' ')       // non-alphanumeric to space
-      .replace(/\b(with|and|or|the|a|an)\b/g, '') // remove stopwords
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  // Score room name similarity (token overlap)
-  function roomScore(selectedName, offerRoomName) {
-    const aTokens = normRoomName(selectedName).split(' ').filter(Boolean);
-    const bTokens = new Set(normRoomName(offerRoomName).split(' ').filter(Boolean));
-    if (!aTokens.length) return 0;
-    const hits = aTokens.filter(t => bTokens.has(t)).length;
-    return hits / aTokens.length;
-  }
-
-  // Find best room match across all offers
-  function findBestRoomMatch(offers, selectedRoomName) {
-    let best = null;
-    for (const offer of (offers || [])) {
-      for (const room of (offer.rooms || [])) {
-        const score = roomScore(selectedRoomName, room.name);
-        if (!best || score > best.score) {
-          best = { score, offer, room };
-        }
-      }
-    }
-    // Threshold: require at least 50% token overlap
-    return best && best.score >= 0.5 ? best : null;
-  }
-
-  function computeRoomAwareComparison(data) {
-    const totalSelectedRooms = (_selectedRooms || []).reduce((s, r) => s + (r.count || 0), 0);
-    const singleSelection = totalSelectedRooms === 1 ? _selectedRooms[0] : null;
-
-    // DEBUG: Log selected rooms state
-    console.log('bookDirect: _selectedRooms state:', { _selectedRooms, totalSelectedRooms, singleSelection });
-
-    // Multi-room: check if all selected rooms are the same type
-    let multiRoomSameName = null;
-    if (totalSelectedRooms > 1 && _selectedRooms.length > 0) {
-      const firstNorm = normRoomName(_selectedRooms[0].name);
-      const allSame = _selectedRooms.every(r => normRoomName(r.name) === firstNorm);
-      if (allSame) {
-        multiRoomSameName = _selectedRooms[0].name;
-      }
-    }
-
-    // Single room selection
-    if (singleSelection) {
-      const match = findBestRoomMatch(data.offers, singleSelection.name);
-      if (match) {
-        return {
-          type: 'matched',
-          selectedName: singleSelection.name,
-          matchedRoom: match.room,
-          matchedOffer: match.offer,
-          matchedTotal: match.room.total,
-          confidence: match.score,
-        };
-      }
-    }
-
-    // Multi-room same type: multiply matched room total
-    if (multiRoomSameName) {
-      const match = findBestRoomMatch(data.offers, multiRoomSameName);
-      if (match) {
-        return {
-          type: 'matched-multi',
-          selectedName: multiRoomSameName,
-          roomCount: totalSelectedRooms,
-          matchedRoom: match.room,
-          matchedOffer: match.offer,
-          matchedTotal: match.room.total * totalSelectedRooms,
-          confidence: match.score,
-        };
-      }
-    }
-
-    // Multi-room different types: can't match
-    if (totalSelectedRooms > 1) {
-      return { type: 'multi-room-unmatchable', roomCount: totalSelectedRooms };
-    }
-
-    // No selection or no match: fall back to cheapest overall
-    return { type: 'fallback' };
-  }
-
-  // Helper: Format timestamp
+  // --- BOOK DIRECT URL HELPERS ---
   function formatTimestamp(isoString) {
     if (!isoString) return '';
     const d = new Date(isoString);
@@ -2187,16 +2162,25 @@ Best regards,`;
 
     const currency = data.query?.currency || 'USD';
     const currentHost = data.query?.currentHost || '';
-    let { cheapestOverall, cheapestOfficial, currentOtaOffer, bookingOffer } = data;
+    const { cheapestOfficial, currentOtaOffer, bookingOffer } = data;
+    let { cheapestOverall } = data; // May be nullified on mismatch
 
-    // --- SELECTION-AWARE CHEAPEST ---
-    // Parse selected rooms and find cheapest provider for those exact rooms
-    const selections = parseSelectedRoomsFromDetails(_roomDetails);
+    // --- SELECTION-AWARE CHEAPEST (use structured _selectedRooms) ---
+    const rawSelections = Array.isArray(_selectedRooms)
+      ? _selectedRooms
+        .filter(r => r && typeof r.name === 'string' && r.name.trim() && (r.count | 0) > 0)
+        .map(r => ({ name: r.name.replace(/\s+/g, ' ').trim(), count: r.count | 0 }))
+      : [];
+
+    // Merge duplicates by normalized name
+    const mergedSelections = mergeSelections(rawSelections);
+    const totalSelectedRooms = mergedSelections.reduce((sum, s) => sum + s.count, 0);
+
+    console.log('bookDirect: Room selections:', { rawSelections, mergedSelections, totalSelectedRooms });
+
     let selectionCheapest = null;
-    let usingRoomMatch = false;
-
-    if (selections.length && Array.isArray(data.offers)) {
-      selectionCheapest = cheapestOfferForSelection(data.offers, selections, currentHost);
+    if (mergedSelections.length && Array.isArray(data.offers)) {
+      selectionCheapest = cheapestOfferForSelection(data.offers, mergedSelections, currentHost);
 
       if (selectionCheapest) {
         console.log('bookDirect: Room-matched cheapest found:', {
@@ -2204,26 +2188,16 @@ Best regards,`;
           total: selectionCheapest.total,
           matched: selectionCheapest.matched
         });
-
-        // Replace cheapestOverall with selection-aware version
-        cheapestOverall = {
-          ...selectionCheapest.offer,
-          total: selectionCheapest.total,
-          totalText: formatComparePrice(selectionCheapest.total, currency),
-          link: selectionCheapest.link || selectionCheapest.offer.link,
-          roomMatch: selectionCheapest.matched
-        };
-        usingRoomMatch = true;
       }
     }
 
     let html = '';
 
-    // Show mismatch warning at top if detected
+    // Show mismatch warning at top if detected (escaped for XSS safety)
     if (_currentMismatch && matchedHotelName) {
       html += `
         <div class="compare-mismatch-warning">
-          ⚠️ Prices may be for: <strong>${matchedHotelName}</strong>
+          ⚠️ Prices may be for: <strong>${escHtml(matchedHotelName)}</strong>
         </div>
       `;
 
@@ -2232,31 +2206,36 @@ Best regards,`;
       cheapestOverall = null;
     }
 
-    // --- ROOM-AWARE COMPARISON (moved earlier to use in cheapest display) ---
-    const roomComparison = computeRoomAwareComparison(data);
-    console.log('bookDirect: Room comparison:', roomComparison);
-
     // Parse the visible page price EARLY (needed for smart badge display)
-    const viewingTotal = parseCurrencyNumber(_price);
+    const viewingTotal = parseMoneyToNumber(_price);
     console.log('bookDirect: Page price for comparison:', { _price, viewingTotal });
 
-    // Determine what to show as "cheapest" - room-matched price vs overall cheapest
-    const isRoomMatched = roomComparison.type === 'matched' || roomComparison.type === 'matched-multi';
+    // --- USE SELECTION-CHEAPEST FOR DISPLAY ---
+    const isRoomMatched = Boolean(selectionCheapest);
+    const displayOffer = isRoomMatched ? selectionCheapest.offer : cheapestOverall;
+    const displayTotal = isRoomMatched ? selectionCheapest.total : cheapestOverall?.total;
 
-    // When room is matched, show the matched room's offer as comparison
-    // Otherwise fall back to overall cheapest
-    const displayOffer = isRoomMatched ? roomComparison.matchedOffer : cheapestOverall;
-    const displayTotal = isRoomMatched ? roomComparison.matchedTotal : cheapestOverall?.total;
-    const displayRoom = isRoomMatched ? roomComparison.matchedRoom : null;
+    // Show provider room name only when a single room type is matched
+    const displayRoomName = (isRoomMatched && selectionCheapest.matched?.length === 1)
+      ? selectionCheapest.matched[0].provider
+      : null;
+
+    const displayLink = isRoomMatched
+      ? (selectionCheapest.link || selectionCheapest.offer?.link)
+      : displayOffer?.link;
 
     // Cheapest display (room-matched when available, otherwise overall)
     if (displayOffer || displayTotal) {
       const sourceLabel = displayOffer?.source || 'Best price';
-      const roomLabel = displayRoom?.name ? ` – ${displayRoom.name.slice(0, 25)}${displayRoom.name.length > 25 ? '…' : ''}` : '';
-      const displayLink = displayRoom?.link || displayOffer?.link;
-      const priceLink = displayLink
-        ? `<a href="${displayLink}" target="_blank" rel="noopener">${formatComparePrice(displayTotal, currency)}</a>`
-        : formatComparePrice(displayTotal, currency);
+      const roomLabel = displayRoomName
+        ? ` – ${displayRoomName.slice(0, 25)}${displayRoomName.length > 25 ? '…' : ''}`
+        : '';
+
+      // Validate URL before creating link (XSS prevention)
+      const safeLink = safeHttpUrl(displayLink);
+      const priceLink = safeLink
+        ? `<a href="${escAttr(safeLink)}" target="_blank" rel="noopener noreferrer">${escHtml(formatComparePrice(displayTotal, currency))}</a>`
+        : escHtml(formatComparePrice(displayTotal, currency));
 
       // Determine if this is actually cheaper than what user is paying on Booking.com
       const isActuallyCheaper = Number.isFinite(viewingTotal) &&
@@ -2266,10 +2245,12 @@ Best regards,`;
         Number.isFinite(displayTotal) &&
         viewingTotal <= displayTotal;
 
-      // Build badges array - only show "Cheaper" if actually cheaper than Booking.com!
+      // Build badges array - "Same Room" for single type, "Selected Rooms" for mix
       const badges = [];
       if (isRoomMatched) {
-        badges.push('<span class="compare-badge matched">Same Room</span>');
+        badges.push(mergedSelections.length > 1
+          ? '<span class="compare-badge matched">Selected Rooms</span>'
+          : '<span class="compare-badge matched">Same Room</span>');
       }
 
       if (isActuallyCheaper) {
@@ -2280,8 +2261,9 @@ Best regards,`;
         badges.push('<span class="compare-badge booking-best">Booking Best</span>');
       }
 
+      // External badges: escape text and sanitize class name
       for (const b of (displayOffer?.badges || [])) {
-        badges.push(`<span class="compare-badge ${b.toLowerCase()}">${b}</span>`);
+        badges.push(`<span class="compare-badge ${safeClassToken(b)}">${escHtml(b)}</span>`);
       }
 
       // Only highlight as cheapest (green) if it actually IS cheaper
@@ -2289,7 +2271,7 @@ Best regards,`;
 
       html += `
         <div class="compare-row">
-          <div class="${sourceClass}" title="${sourceLabel}${roomLabel}">${sourceLabel}</div>
+          <div class="${sourceClass}" title="${escAttr(sourceLabel + roomLabel)}">${escHtml(sourceLabel)}</div>
           <div class="compare-price">${priceLink}</div>
           <div class="compare-tags">${badges.join('')}</div>
         </div>
@@ -2297,13 +2279,14 @@ Best regards,`;
 
       // If room matched, also show overall cheapest if different and cheaper
       if (isRoomMatched && cheapestOverall && cheapestOverall.total < displayTotal) {
-        const overallLink = cheapestOverall.link
-          ? `<a href="${cheapestOverall.link}" target="_blank" rel="noopener">${formatComparePrice(cheapestOverall.total, currency)}</a>`
-          : formatComparePrice(cheapestOverall.total, currency);
+        const overallSafeLink = safeHttpUrl(cheapestOverall.link);
+        const overallLink = overallSafeLink
+          ? `<a href="${escAttr(overallSafeLink)}" target="_blank" rel="noopener noreferrer">${escHtml(formatComparePrice(cheapestOverall.total, currency))}</a>`
+          : escHtml(formatComparePrice(cheapestOverall.total, currency));
 
         html += `
           <div class="compare-row compare-row-secondary">
-            <div class="compare-source" title="${cheapestOverall.source} (different room type)">${cheapestOverall.source}</div>
+            <div class="compare-source" title="${escAttr(cheapestOverall.source + ' (different room type)')}">${escHtml(cheapestOverall.source)}</div>
             <div class="compare-price">${overallLink}</div>
             <div class="compare-tags"><span class="compare-badge other-room">Other Room</span></div>
           </div>
@@ -2311,22 +2294,23 @@ Best regards,`;
       }
     }
 
-    // Official site (if different from cheapest)
-    if (cheapestOfficial && cheapestOfficial.source !== cheapestOverall?.source) {
-      const fullSourceName = cheapestOfficial.source || 'Official Site'; // Keep for tooltip
-      const priceLink = cheapestOfficial.link
-        ? `<a href="${cheapestOfficial.link}" target="_blank" rel="noopener">${formatComparePrice(cheapestOfficial.total, currency)}</a>`
-        : formatComparePrice(cheapestOfficial.total, currency);
+    // Official site (if different from the displayed offer)
+    if (cheapestOfficial && cheapestOfficial.source !== displayOffer?.source) {
+      const fullSourceName = cheapestOfficial.source || 'Official Site';
+      const officialSafeLink = safeHttpUrl(cheapestOfficial.link);
+      const priceLink = officialSafeLink
+        ? `<a href="${escAttr(officialSafeLink)}" target="_blank" rel="noopener noreferrer">${escHtml(formatComparePrice(cheapestOfficial.total, currency))}</a>`
+        : escHtml(formatComparePrice(cheapestOfficial.total, currency));
 
-      // Build badges array
+      // Build badges array (external badges escaped)
       const badges = ['<span class="compare-badge official">Direct</span>'];
       for (const b of (cheapestOfficial.badges || [])) {
-        badges.push(`<span class="compare-badge ${b.toLowerCase()}">${b}</span>`);
+        badges.push(`<span class="compare-badge ${safeClassToken(b)}">${escHtml(b)}</span>`);
       }
 
       html += `
         <div class="compare-row">
-          <div class="compare-source" title="${fullSourceName}">Official site</div>
+          <div class="compare-source" title="${escAttr(fullSourceName)}">Official site</div>
           <div class="compare-price">${priceLink}</div>
           <div class="compare-tags">${badges.join('')}</div>
         </div>
@@ -2338,26 +2322,24 @@ Best regards,`;
 
     // Savings calculation - use PAGE price as baseline (what user is actually paying)
     // Suppress if mismatch detected, member-only, or not meaningful
-    const cheapestHasMemberBadge = (cheapestOverall?.badges || []).some(
+    // Use displayOffer for member check (correct when selection-matched)
+    const displayHasMemberBadge = (displayOffer?.badges || []).some(
       b => ['Member', 'Login', 'Mobile'].includes(b)
     );
 
-    // viewingTotal already parsed earlier at line 2228
+    // viewingTotal already parsed earlier
     // Google's Booking.com price from compare data
     const googleBookingTotal = bookingOffer?.total ?? currentOtaOffer?.total ?? null;
-
-    // (roomComparison already computed earlier at line 2053)
 
     // Choose baseline - prefer room-matched comparison when available
     let baselineTotal = null;
     let baselineLabel = 'Booking.com';
-    let roomNote = '';
 
-    if (roomComparison.type === 'multi-room-unmatchable') {
-      // Multi-room with different types: can't compare accurately
+    // Multi-room unable to match note
+    if (totalSelectedRooms > 1 && !selectionCheapest) {
       html += `
         <div class="compare-room-note">
-          ℹ️ Multi-room selection – savings shown for cheapest room
+          ℹ️ Multi-room – unable to match all rooms
         </div>
       `;
     }
@@ -2370,12 +2352,6 @@ Best regards,`;
       baselineTotal = viewingTotal;
     } else if (Number.isFinite(googleBookingTotal)) {
       baselineTotal = googleBookingTotal;
-    }
-
-    // Room match feedback
-    if (roomComparison.type === 'matched' || roomComparison.type === 'matched-multi') {
-      const roomName = roomComparison.matchedRoom?.name || roomComparison.selectedName;
-      roomNote = roomName ? ` (${roomName.slice(0, 30)}${roomName.length > 30 ? '...' : ''})` : '';
     }
 
     // --- DEBUG: Savings calculation inputs ---
@@ -2404,7 +2380,7 @@ Best regards,`;
 
       // Only show savings callout if meaningful (>=1.5% or above currency minimum)
       if (isMeaningfulSavings(savings, baselineTotal, currency)) {
-        if (cheapestHasMemberBadge) {
+        if (displayHasMemberBadge) {
           // Cheapest requires membership - show note instead of full savings
           html += `
             <div class="compare-member-note">
@@ -2585,7 +2561,7 @@ Best regards,`;
     }
   }, 3500);
 
-  // Expose update methods
+  // Expose update methods (DOM-based, XSS-safe)
   container.updatePrice = function (newPrice) {
     // Skip if price hasn't actually changed
     if (newPrice === _price) return;
@@ -2594,16 +2570,26 @@ Best regards,`;
     _price = newPrice;
     const priceDisplay = shadowRoot.getElementById('price-display');
     if (priceDisplay && newPrice) {
-      // Parse and format with same logic as initial render
+      // Parse and format with same logic as initial render (DOM-based)
       const priceStr = newPrice.trim();
       const match = priceStr.match(/^([A-Z]{2,3}|[€$£¥₹])\s*(.+)$/i) ||
         priceStr.match(/^(.+?)\s*([A-Z]{2,3})$/i);
 
+      priceDisplay.textContent = "";
       if (match) {
         const [, currency, amount] = match;
-        priceDisplay.innerHTML = `<span class="price-currency">${currency}</span><span class="price-amount">${amount}</span>`;
+        const cur = document.createElement("span");
+        cur.className = "price-currency";
+        cur.textContent = currency;
+        const amt = document.createElement("span");
+        amt.className = "price-amount";
+        amt.textContent = amount;
+        priceDisplay.append(cur, amt);
       } else {
-        priceDisplay.innerHTML = `<span class="price-amount">${priceStr}</span>`;
+        const amt = document.createElement("span");
+        amt.className = "price-amount";
+        amt.textContent = priceStr;
+        priceDisplay.append(amt);
       }
 
       // Only flash animation if price actually changed
