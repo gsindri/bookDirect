@@ -120,7 +120,9 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
         hl: params.hl,
         officialUrl: params.officialUrl,
         currentHost: params.currentHost,
-        ctx: ctxId // Use looked-up ctx, not params.ctx
+        ctx: ctxId, // Use looked-up ctx, not params.ctx
+        bookingUrl: params.bookingUrl,  // For smart slug extraction in Worker
+        smart: params.smart ? '1' : undefined  // Smart multi-pass search mode
     };
 
     Object.entries(paramMap).forEach(([key, value]) => {
