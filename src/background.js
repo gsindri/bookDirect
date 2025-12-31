@@ -263,10 +263,14 @@ async function fetchCompareDeduped(tabId, params, forceRefresh = false) {
             // Track the result for retry logic
             const hadOfficialUrl = !!(params.officialUrl);
             const existing = compareResultTracker.get(key) || {};
+
+            // Store enhanced metrics for smarter retries
             compareResultTracker.set(key, {
                 offersCount: data.offersCount ?? 0,
                 hadOfficialUrl,
-                retriedWithOfficialUrl: existing.retriedWithOfficialUrl || false
+                retriedWithOfficialUrl: existing.retriedWithOfficialUrl || false,
+                matchUncertain: !!data.match?.matchUncertain,
+                confidence: data.match?.confidence ?? null
             });
 
             return data;
@@ -315,11 +319,25 @@ function shouldRetryWithOfficialUrl(tabId, params, officialUrl) {
     if (!tracker) return false; // No previous call
     if (tracker.hadOfficialUrl) return false; // Already had officialUrl
     if (tracker.retriedWithOfficialUrl) return false; // Already retried once
-    if (tracker.offersCount > 0) return false; // Had offers, no need to retry
 
-    // Previous call had 0 offers and no officialUrl - should retry
-    Logger.debug('Will retry with officialUrl (previous had 0 offers)');
-    return true;
+    // RETRY CONDITIONS:
+    // 1. Match was explicitly marked uncertain
+    if (tracker.matchUncertain) {
+        Logger.debug('Will retry with officialUrl (previous match was uncertain)');
+        return true;
+    }
+    // 2. Low confidence (< 0.65)
+    if (tracker.confidence != null && tracker.confidence < 0.65) {
+        Logger.debug(`Will retry with officialUrl (low confidence: ${tracker.confidence})`);
+        return true;
+    }
+    // 3. Zero offers found
+    if (tracker.offersCount === 0) {
+        Logger.debug('Will retry with officialUrl (previous had 0 offers)');
+        return true;
+    }
+
+    return false;
 }
 
 // Mark that we retried with officialUrl
@@ -411,20 +429,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 Logger.debug('Set officialUrl for tab', tabId, message.officialUrl);
 
                 // Check if we should trigger a retry
+                // IMPORTANT: We must use the OLD context (without officialUrl) to find the original tracker entry
+                // The tracker key includes officialUrl, so if we use the new URL we won't find the history
                 if (message.officialUrl && !oldUrl) {
-                    const params = { ...context };
-                    if (shouldRetryWithOfficialUrl(tabId, params, message.officialUrl)) {
-                        markRetriedWithOfficialUrl(tabId, params);
+                    const oldParams = { ...context, officialUrl: '' }; // Force empty officialUrl to match original key
 
-                        // Trigger retry with officialUrl (but keep caches/ctx enabled)
-                        // NOTE: forceRefresh=false preserves ctx lookup, refresh=1 is for manual user action only
+                    if (shouldRetryWithOfficialUrl(tabId, oldParams, message.officialUrl)) {
+                        markRetriedWithOfficialUrl(tabId, oldParams);
+
+                        // Trigger retry with new officialUrl
                         Logger.debug('Auto-retrying compare with officialUrl (keeping caches)');
-                        fetchCompareDeduped(tabId, params, false).then(data => {
+                        const newParams = { ...context, officialUrl: message.officialUrl };
+
+                        fetchCompareDeduped(tabId, newParams, false).then(data => {
                             if (!data.error) {
-                                setCachedCompare(tabId, params, data);
+                                setCachedCompare(tabId, newParams, data);
                             }
-                            // Note: We can't easily notify the UI here
-                            // The UI will get the updated cache on next request
                         });
                     }
                 }

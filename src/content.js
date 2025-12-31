@@ -1368,7 +1368,9 @@
             currentHost,
             currentOtaPriceTotal,
             gl,
-            hl
+            hl,
+            bookingUrl: window.location.href, // Pass current URL for smart slug matching
+            smart: true // Enable smart matching in worker
         };
     }
 
