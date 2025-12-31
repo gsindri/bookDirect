@@ -1015,15 +1015,29 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex; border-top:1px solid #e7e7e7; padding-top:12px;';
 
-    // Check-in
+    // Check-in (safe DOM construction - no innerHTML with dynamic values)
     const col1 = document.createElement('div');
     col1.style.cssText = 'flex:1; border-right:1px solid #e7e7e7; padding-right:12px;';
-    col1.innerHTML = `<div style="font-size:12px; color:#595959; margin-bottom:4px;">Check-in</div><div style="font-weight:700; color:#1a1a1a; font-size:14px;">${checkIn}</div>`;
+    const col1Label = document.createElement('div');
+    col1Label.style.cssText = 'font-size:12px; color:#595959; margin-bottom:4px;';
+    col1Label.textContent = 'Check-in';
+    const col1Value = document.createElement('div');
+    col1Value.style.cssText = 'font-weight:700; color:#1a1a1a; font-size:14px;';
+    col1Value.textContent = checkIn;
+    col1.appendChild(col1Label);
+    col1.appendChild(col1Value);
 
-    // Check-out
+    // Check-out (safe DOM construction - no innerHTML with dynamic values)
     const col2 = document.createElement('div');
     col2.style.cssText = 'flex:1; padding-left:12px;';
-    col2.innerHTML = `<div style="font-size:12px; color:#595959; margin-bottom:4px;">Check-out</div><div style="font-weight:700; color:#1a1a1a; font-size:14px;">${checkOut}</div>`;
+    const col2Label = document.createElement('div');
+    col2Label.style.cssText = 'font-size:12px; color:#595959; margin-bottom:4px;';
+    col2Label.textContent = 'Check-out';
+    const col2Value = document.createElement('div');
+    col2Value.style.cssText = 'font-weight:700; color:#1a1a1a; font-size:14px;';
+    col2Value.textContent = checkOut;
+    col2.appendChild(col2Label);
+    col2.appendChild(col2Value);
 
     row.appendChild(col1);
     row.appendChild(col2);
@@ -1110,7 +1124,7 @@ Best regards,`;
 
     // DEBUG: Skip highlight/bubble entirely if disabled
     if (FLAGS.ENABLE_HIGHLIGHT_BUBBLE === false) {
-      console.log('[bookDirect][debug] Highlight/bubble disabled via DEBUG_FLAGS');
+      Logger.debug('[debug] Highlight/bubble disabled via DEBUG_FLAGS');
       return false;
     }
 
@@ -1143,7 +1157,7 @@ Best regards,`;
 
       scrollAnchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
     } else {
-      console.log('[bookDirect][debug] scrollIntoView disabled via DEBUG_FLAGS');
+      Logger.debug('[debug] scrollIntoView disabled via DEBUG_FLAGS');
     }
 
     // 3. Restore horizontal scrollLeft after browser finishes scroll
@@ -1394,7 +1408,7 @@ Best regards,`;
               sidebarEl.prepend(injectedDiv);
               sidebarEl.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' });
             } else if (FLAGS.ENABLE_DATE_GRID_INJECTION === false) {
-              console.log('[bookDirect][debug] Date grid injection disabled via DEBUG_FLAGS');
+              Logger.debug('[debug] Date grid injection disabled via DEBUG_FLAGS');
             }
 
             // STEP D: Wait for scroll, then capture
@@ -1406,7 +1420,7 @@ Best regards,`;
                   requestAnimationFrame(() => {
                     // Safety timeout
                     const safetyTimeout = setTimeout(() => {
-                      console.warn('bookDirect: Screenshot safety timeout - forcing cleanup');
+                      Logger.warn('Screenshot safety timeout - forcing cleanup');
                       doCleanup();
                       reject(new Error('Screenshot timed out'));
                     }, 5000);
@@ -1491,7 +1505,7 @@ Best regards,`;
 
       // DEBUG: Skip screenshot if disabled
       if (FLAGS.ENABLE_SCREENSHOT === false) {
-        console.log('[bookDirect][debug] Screenshot disabled via DEBUG_FLAGS');
+        Logger.debug('[debug] Screenshot disabled via DEBUG_FLAGS');
         showToast();
         return;
       }
@@ -1499,7 +1513,7 @@ Best regards,`;
       await captureAndCopyScreenshot();
       showToast();
     } catch (e) {
-      console.error('Screenshot copy failed:', e.message || e.name || String(e));
+      Logger.error('Screenshot copy failed:', e.message || e.name || String(e));
 
       // If it was a permission/screenshot specific error, show that
       // Otherwise fall back to text
@@ -1574,7 +1588,7 @@ Best regards,`;
           _foundEmail = data.found_email;
           emailActions.style.display = 'block';
           hasAnyData = true;
-          console.log('bookDirect: Found email:', _foundEmail);
+          Logger.info('Found email:', _foundEmail);
         } else if (!data.found_email) {
           // Search Assist fallback: If no email found, show "Find Contact Info" button
           const contactFallback = shadowRoot.getElementById('contact-fallback');
@@ -1648,7 +1662,7 @@ Best regards,`;
           directDealSection.style.display = 'block';
         } else {
           directDealSection.style.display = 'none';
-          console.log('bookDirect: No contact data found - hiding Direct Deal section');
+          Logger.debug('No contact data found - hiding Direct Deal section');
         }
       };
 
@@ -1662,7 +1676,7 @@ Best regards,`;
 
           // STEP B (HIT): Use cache if < 30 days old
           if (age < THIRTY_DAYS_MS && data) {
-            console.log('bookDirect: Using cached hotel data (age:', Math.round(age / 86400000), 'days)');
+            Logger.debug('Using cached hotel data (age:', Math.round(age / 86400000), 'days)');
             renderButtons(data);
             return; // Done! No API call needed.
           }
@@ -1670,7 +1684,7 @@ Best regards,`;
       }
 
       // STEP C (MISS): Call API via background (avoids CORS)
-      console.log('bookDirect: Cache miss, fetching from API via background...');
+      Logger.debug('Cache miss, fetching from API via background...');
 
       let data = null;
       try {
@@ -1687,26 +1701,26 @@ Best regards,`;
           });
         });
       } catch (e) {
-        console.log('bookDirect: Hotel details fetch failed:', e.message);
+        Logger.warn('Hotel details fetch failed:', e.message);
         return; // Fail silently
       }
 
       if (!data || data.error) {
-        console.log('bookDirect: Hotel details response error:', data?.error);
+        Logger.warn('Hotel details response error:', data?.error);
         return; // Fail silently
       }
 
       // Save to cache with timestamp
       if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         chrome.storage.local.set({ [cacheKey]: { data, timestamp: Date.now() } });
-        console.log('bookDirect: Cached hotel data for', _hotelName);
+        Logger.debug('Cached hotel data for', _hotelName);
       }
 
       renderButtons(data);
 
     } catch (e) {
       // Fail silently - don't show errors to user
-      console.log('bookDirect: Hotel details fetch failed (silent):', e.message);
+      Logger.warn('Hotel details fetch failed (silent):', e.message);
     }
   })();
 
@@ -1733,9 +1747,9 @@ Best regards,`;
     _compareRerenderTimer = setTimeout(() => {
       try {
         renderCompareResults(_lastCompareData);
-        console.log('bookDirect: Debounced rerender complete');
+        Logger.debug('Debounced rerender complete');
       } catch (e) {
-        console.error('bookDirect: Rerender error', e);
+        Logger.error('Rerender error', e);
       }
     }, 180);
   }
@@ -1848,7 +1862,7 @@ Best regards,`;
     return Number.isFinite(n) ? n : NaN;
   }
 
-    // --- ROOM MATCHING HELPERS (for like-for-like comparison) ---
+  // --- ROOM MATCHING HELPERS (for like-for-like comparison) ---
 
   // Normalize room name for fuzzy matching
   function normalizeRoomName(name) {
@@ -1913,6 +1927,7 @@ Best regards,`;
 
     let total = 0;
     const matched = [];
+    const roomBadges = new Set(); // Collect badges from matched rooms
 
     for (const sel of selections) {
       const m = bestRoomMatch(sel.name, offer.rooms);
@@ -1927,10 +1942,17 @@ Best regards,`;
         link: m.room.link || offer.link,
         score: m.score
       });
+
+      // Collect room-level badges (membership flags from room URL)
+      if (Array.isArray(m.room.badges)) {
+        for (const b of m.room.badges) roomBadges.add(b);
+      }
     }
 
     const link = matched.length === 1 ? matched[0].link : offer.link;
-    return { total, matched, link };
+    // Merge room badges with offer badges (room badges take precedence for room-matched display)
+    const badges = [...new Set([...roomBadges, ...(offer.badges || [])])];
+    return { total, matched, link, badges };
   }
 
   // Find cheapest offer for selected room(s) across all providers
@@ -1952,7 +1974,8 @@ Best regards,`;
           offer: o,
           total: calc.total,
           matched: calc.matched,
-          link: calc.link
+          link: calc.link,
+          badges: calc.badges // Room-matched badges (from room URLs)
         };
       }
     }
@@ -2032,7 +2055,7 @@ Best regards,`;
       } catch { /* ignore */ }
     }
 
-    console.log('bookDirect: Updated _bookDirectUrl from', source, '->', url);
+    Logger.debug('Updated _bookDirectUrl from', source, '->', url);
   }
 
   // --- BOOK DIRECT URL HELPERS ---
@@ -2096,6 +2119,13 @@ Best regards,`;
     return savings >= Math.max(minAbs, minPct);
   }
 
+  // --- OFFER GATING DETECTION ---
+  // Returns true if offer requires membership, login, or mobile app
+  function offerHasGate(offer) {
+    const badges = offer?.badges || [];
+    return badges.some(b => ['Member', 'Login', 'Mobile'].includes(b));
+  }
+
   // --- FOOTER UPDATE FUNCTION ---
   function updateCompareFooter() {
     const data = _lastCompareData;
@@ -2132,8 +2162,8 @@ Best regards,`;
     }
 
     // Debug: Log full response
-    console.log('bookDirect: Compare response data:', data);
-    console.log('bookDirect: Offers count:', data.offersCount, 'cheapestOverall:', data.cheapestOverall, 'cheapestOfficial:', data.cheapestOfficial);
+    Logger.debug('Compare response data:', data);
+    Logger.debug('Offers count:', data.offersCount, 'cheapestOverall:', data.cheapestOverall, 'cheapestOfficial:', data.cheapestOfficial);
 
     // --- MISMATCH DETECTION ---
     // Use match.matchedHotelName, or fall back to property.name (cached responses may not have matchedHotelName)
@@ -2142,7 +2172,7 @@ Best regards,`;
     const isLowConfidence = (data.match?.confidence ?? 1) < 0.4;
 
     // Debug: Log mismatch detection values
-    console.log('bookDirect: Mismatch detection:', {
+    Logger.debug('Mismatch detection:', {
       searchedHotel: _hotelName,
       matchedHotel: matchedHotelName,
       isMismatch: mismatchCheck.isMismatch,
@@ -2176,14 +2206,15 @@ Best regards,`;
     const mergedSelections = mergeSelections(rawSelections);
     const totalSelectedRooms = mergedSelections.reduce((sum, s) => sum + s.count, 0);
 
-    console.log('bookDirect: Room selections:', { rawSelections, mergedSelections, totalSelectedRooms });
+    Logger.debug('Room selections:', { rawSelections, mergedSelections, totalSelectedRooms });
+
 
     let selectionCheapest = null;
     if (mergedSelections.length && Array.isArray(data.offers)) {
       selectionCheapest = cheapestOfferForSelection(data.offers, mergedSelections, currentHost);
 
       if (selectionCheapest) {
-        console.log('bookDirect: Room-matched cheapest found:', {
+        Logger.debug('Room-matched cheapest found:', {
           provider: selectionCheapest.offer.source,
           total: selectionCheapest.total,
           matched: selectionCheapest.matched
@@ -2208,7 +2239,7 @@ Best regards,`;
 
     // Parse the visible page price EARLY (needed for smart badge display)
     const viewingTotal = parseMoneyToNumber(_price);
-    console.log('bookDirect: Page price for comparison:', { _price, viewingTotal });
+    Logger.debug('Page price for comparison:', { _price, viewingTotal });
 
     // --- USE SELECTION-CHEAPEST FOR DISPLAY ---
     const isRoomMatched = Boolean(selectionCheapest);
@@ -2223,6 +2254,11 @@ Best regards,`;
     const displayLink = isRoomMatched
       ? (selectionCheapest.link || selectionCheapest.offer?.link)
       : displayOffer?.link;
+
+    // Detect if displayed offer has membership/login gate
+    // Use room-matched badges when available (they come from room URLs)
+    const displayBadges = isRoomMatched ? (selectionCheapest.badges || displayOffer?.badges || []) : (displayOffer?.badges || []);
+    const displayHasGate = displayBadges.some(b => ['Member', 'Login', 'Mobile'].includes(b));
 
     // Cheapest display (room-matched when available, otherwise overall)
     if (displayOffer || displayTotal) {
@@ -2262,7 +2298,8 @@ Best regards,`;
       }
 
       // External badges: escape text and sanitize class name
-      for (const b of (displayOffer?.badges || [])) {
+      // Use displayBadges which includes room-matched badges when applicable
+      for (const b of displayBadges) {
         badges.push(`<span class="compare-badge ${safeClassToken(b)}">${escHtml(b)}</span>`);
       }
 
@@ -2289,6 +2326,16 @@ Best regards,`;
             <div class="compare-source" title="${escAttr(cheapestOverall.source + ' (different room type)')}">${escHtml(cheapestOverall.source)}</div>
             <div class="compare-price">${overallLink}</div>
             <div class="compare-tags"><span class="compare-badge other-room">Other Room</span></div>
+          </div>
+        `;
+      }
+
+      // --- MEMBER/LOGIN GATE NOTE (always visible when relevant) ---
+      // Show note outside savings block so it appears even if savings aren't shown
+      if (!_currentMismatch && displayHasGate) {
+        html += `
+          <div class="compare-member-note">
+            💡 Cheapest price may require membership/login
           </div>
         `;
       }
@@ -2320,13 +2367,6 @@ Best regards,`;
     // NOTE: Removed duplicate 'Booking.com (viewing)' row - already shown in hero section above
     const currentOffer = currentOtaOffer || bookingOffer;
 
-    // Savings calculation - use PAGE price as baseline (what user is actually paying)
-    // Suppress if mismatch detected, member-only, or not meaningful
-    // Use displayOffer for member check (correct when selection-matched)
-    const displayHasMemberBadge = (displayOffer?.badges || []).some(
-      b => ['Member', 'Login', 'Mobile'].includes(b)
-    );
-
     // viewingTotal already parsed earlier
     // Google's Booking.com price from compare data
     const googleBookingTotal = bookingOffer?.total ?? currentOtaOffer?.total ?? null;
@@ -2355,7 +2395,7 @@ Best regards,`;
     }
 
     // --- DEBUG: Savings calculation inputs ---
-    console.log('bookDirect: Savings calc inputs:', {
+    Logger.debug('Savings calc inputs:', {
       _price,
       viewingTotal,
       googleBookingTotal,
@@ -2379,24 +2419,16 @@ Best regards,`;
       });
 
       // Only show savings callout if meaningful (>=1.5% or above currency minimum)
-      if (isMeaningfulSavings(savings, baselineTotal, currency)) {
-        if (displayHasMemberBadge) {
-          // Cheapest requires membership - show note instead of full savings
-          html += `
-            <div class="compare-member-note">
-              💡 Cheapest price may require membership/login
-            </div>
-          `;
-        } else {
-          html += `
-            <div class="compare-savings">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              </svg>
-              Save ${formatComparePrice(savings, currency)} vs your selection
-            </div>
-          `;
-        }
+      // Note: Gate warning is already shown earlier (unconditionally) so just show savings if not gated
+      if (isMeaningfulSavings(savings, baselineTotal, currency) && !displayHasGate) {
+        html += `
+          <div class="compare-savings">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+            </svg>
+            Save ${formatComparePrice(savings, currency)} vs your selection
+          </div>
+        `;
       }
       // If savings are trivial, just show nothing (cleaner than a preachy message)
     }

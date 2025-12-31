@@ -22,6 +22,7 @@
                 "*://*.booking.com/searchresults*"
             ],
             "js": [
+                "src/logger.js",
                 "src/searchPrefetch.js"
             ],
             "run_at": "document_start"
@@ -31,6 +32,7 @@
                 "*://*.booking.com/hotel/*"
             ],
             "js": [
+                "src/logger.js",
                 "src/components/OverflowDiagnostics.js",
                 "src/components/PriceCheckUI.js",
                 "src/content.js"

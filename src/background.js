@@ -1,4 +1,4 @@
-console.log('bookDirect background service worker loaded.');
+importScripts('logger.js');
 
 // --- CONFIGURATION ---
 const WORKER_BASE_URL = 'https://hotelfinder.gsindrih.workers.dev';
@@ -8,6 +8,14 @@ const CTX_PREFIX = "bd_ctx_v1:";
 
 // DEV flag: set to true to enable debug mode in /compare calls
 const DEV_DEBUG = false;
+
+// Initialize shared logger
+if (typeof Logger !== 'undefined') {
+    Logger.init(DEV_DEBUG);
+    Logger.info('background service worker loaded.');
+} else {
+    console.error('bookDirect: Logger not loaded!');
+}
 
 // --- FORCE REFRESH THROTTLE ---
 const forceRefreshCooldowns = new Map(); // key -> cooldownUntil timestamp
@@ -44,12 +52,14 @@ async function storeCtxId(params, ctxId, tabId) {
 
     // Store by itinerary (fallback for new-tab opens)
     await chrome.storage.session.set({ [itineraryKey]: toStore });
-    console.log("bookDirect: Stored ctxId by itinerary", itineraryKey, ctxId);
+    Logger.debug("Stored ctxId by itinerary", itineraryKey, ctxId);
 
     // Store by tabId (primary for same-tab navigation)
     if (tabKey) {
         await chrome.storage.session.set({ [tabKey]: toStore });
-        console.log("bookDirect: Stored ctxId by tabId", tabKey, ctxId);
+        // Also store in in-memory map for fast opener propagation
+        tabCtxIds.set(tabId, toStore);
+        Logger.debug("Stored ctxId by tabId", tabKey, ctxId);
     }
 }
 
@@ -64,7 +74,7 @@ async function loadCtxId(params, tabId) {
             // Verify dates match (in case tab navigated to different itinerary)
             const stored = tabObj[tabKey];
             if (stored.checkIn === params.checkIn && stored.checkOut === params.checkOut) {
-                console.log("bookDirect: Loaded ctxId from tabId", tabKey, stored.ctxId);
+                Logger.debug("Loaded ctxId from tabId", tabKey, stored.ctxId);
                 return stored.ctxId;
             }
         }
@@ -75,7 +85,7 @@ async function loadCtxId(params, tabId) {
     const obj = await chrome.storage.session.get(itineraryKey);
     const ctxId = obj?.[itineraryKey]?.ctxId || null;
     if (ctxId) {
-        console.log("bookDirect: Loaded ctxId from itinerary", itineraryKey, ctxId);
+        Logger.debug("Loaded ctxId from itinerary", itineraryKey, ctxId);
     }
     return ctxId;
 }
@@ -90,10 +100,67 @@ const inFlightRequests = new Map();
 // Track compare results per key (for retry logic)
 // key -> { offersCount, hadOfficialUrl, retriedWithOfficialUrl }
 const compareResultTracker = new Map();
+// In-memory map of tabId -> ctxId (for fast opener propagation, no async storage needed)
+const tabCtxIds = new Map();
+
+// --- OPENER TAB PROPAGATION ---
+// When a new tab is opened from a search results tab (openerTabId), copy the ctxId to the new tab
+// This prevents context collisions when users open hotels from different searches with identical dates
+async function copyCtxIdFromOpener(newTabId, openerTabId) {
+    if (!openerTabId || !newTabId) return;
+
+    // First check in-memory map (fastest)
+    if (tabCtxIds.has(openerTabId)) {
+        const ctxData = tabCtxIds.get(openerTabId);
+        tabCtxIds.set(newTabId, ctxData);
+
+        // Also persist to session storage
+        const tabKey = `${CTX_PREFIX}tab:${newTabId}`;
+        await chrome.storage.session.set({ [tabKey]: ctxData });
+        Logger.debug('Propagated ctxId from opener tab', openerTabId, 'to new tab', newTabId, ctxData.ctxId);
+        return;
+    }
+
+    // Fallback: check session storage for opener tab
+    const openerKey = `${CTX_PREFIX}tab:${openerTabId}`;
+    const openerObj = await chrome.storage.session.get(openerKey);
+    if (openerObj?.[openerKey]?.ctxId) {
+        const ctxData = openerObj[openerKey];
+
+        // Store for new tab
+        const newTabKey = `${CTX_PREFIX}tab:${newTabId}`;
+        await chrome.storage.session.set({ [newTabKey]: ctxData });
+        tabCtxIds.set(newTabId, ctxData);
+
+        Logger.debug('Propagated ctxId from opener tab (session storage)', openerTabId, 'to new tab', newTabId, ctxData.ctxId);
+    }
+}
+
+// Listen for new tabs and propagate ctxId from opener
+chrome.tabs.onCreated.addListener((tab) => {
+    if (tab.openerTabId && tab.id) {
+        // Async propagation - don't block tab creation
+        copyCtxIdFromOpener(tab.id, tab.openerTabId).catch(err => {
+            Logger.warn('Failed to propagate ctxId from opener:', err);
+        });
+    }
+});
 
 // --- COMPARE KEY ---
+// Helper to extract normalized hostname (no www prefix)
+function getHostNoWww(urlString) {
+    if (!urlString) return '';
+    try {
+        return new URL(urlString).hostname.replace(/^www\./, '').toLowerCase();
+    } catch {
+        return '';
+    }
+}
+
+// Include officialUrl domain to prevent cache collisions between "with hint" vs "without hint" requests
 function getCompareKey(tabId, params) {
-    return `${tabId}|${params.hotelName}|${params.checkIn}|${params.checkOut}|${params.adults}|${params.currency || ''}|${params.gl || ''}`;
+    const officialDomain = getHostNoWww(params.officialUrl);
+    return `${tabId}|${params.hotelName}|${params.checkIn}|${params.checkOut}|${params.adults}|${params.currency || ''}|${params.gl || ''}|${params.hl || ''}|${officialDomain}|${params.smart ? '1' : '0'}`;
 }
 
 // --- COMPARE API CLIENT ---
@@ -104,9 +171,9 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
     // Pass tabId for same-tab lookup, falls back to itinerary key
     const ctxId = await loadCtxId(params, tabId);
     if (ctxId) {
-        console.log("bookDirect: Using ctxId for /compare:", ctxId);
+        Logger.debug("Using ctxId for /compare:", ctxId);
     } else {
-        console.log("bookDirect: No ctxId found for this itinerary");
+        Logger.debug("No ctxId found for this itinerary");
     }
 
     // Build query params
@@ -144,14 +211,14 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
     // Always request room-level pricing for room-aware savings
     url.searchParams.set('includeRooms', '1');
 
-    console.log('bookDirect: Fetching /compare', url.toString());
+    Logger.debug('Fetching /compare', url.toString());
 
     try {
         const response = await fetch(url.toString());
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            console.error('bookDirect: Compare API error response:', response.status, JSON.stringify(errorData));
+            Logger.error('Compare API error response:', response.status, JSON.stringify(errorData));
             return {
                 error: errorData.error || `API error: ${response.status}`,
                 status: response.status,
@@ -160,7 +227,7 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
         }
 
         const data = await response.json();
-        console.log('bookDirect: Compare success:', {
+        Logger.debug('Compare success:', {
             cache: data.cache,
             offers: data.offersCount,
             token: data.match?.cacheDetail?.token || '(no token info)',
@@ -168,7 +235,7 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
         });
         return data;
     } catch (err) {
-        console.error('bookDirect: Compare fetch failed', err);
+        Logger.error('Compare fetch failed', err);
         return {
             error: err.message || 'Network error',
             status: 0
@@ -183,7 +250,7 @@ async function fetchCompareDeduped(tabId, params, forceRefresh = false) {
 
     // If already in-flight and not forcing refresh, return the existing promise
     if (!forceRefresh && inFlightRequests.has(key)) {
-        console.log('bookDirect: Returning in-flight request for', key);
+        Logger.debug('Returning in-flight request for', key);
         return inFlightRequests.get(key);
     }
 
@@ -251,7 +318,7 @@ function shouldRetryWithOfficialUrl(tabId, params, officialUrl) {
     if (tracker.offersCount > 0) return false; // Had offers, no need to retry
 
     // Previous call had 0 offers and no officialUrl - should retry
-    console.log('bookDirect: Will retry with officialUrl (previous had 0 offers)');
+    Logger.debug('Will retry with officialUrl (previous had 0 offers)');
     return true;
 }
 
@@ -270,14 +337,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender.tab?.id;
 
     // Log all incoming messages for debugging
-    console.log('bookDirect: onMessage', message?.type || message?.action, 'from tab', tabId, message);
+    Logger.debug('onMessage', message?.type || message?.action, 'from tab', tabId, message);
 
     // Screenshot capture (existing)
     if (message.type === 'ACTION_CAPTURE_VISIBLE_TAB') {
         const targetWindowId = sender.tab ? sender.tab.windowId : null;
         chrome.tabs.captureVisibleTab(targetWindowId, { format: 'jpeg', quality: 80 }, (dataUrl) => {
             if (chrome.runtime.lastError) {
-                console.error(chrome.runtime.lastError.message);
+                Logger.error(chrome.runtime.lastError.message);
                 sendResponse({ success: false, error: chrome.runtime.lastError.message });
             } else {
                 sendResponse({ success: true, dataUrl: dataUrl });
@@ -290,7 +357,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'BOOKDIRECT_PAGE_CONTEXT') {
         if (tabId) {
             tabContexts.set(tabId, message.payload);
-            console.log('bookDirect: Stored page context for tab', tabId);
+            Logger.debug('Stored page context for tab', tabId);
         }
         sendResponse({ success: true });
         return false;
@@ -300,7 +367,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // NOTE: content.js sends { type: "PREFETCH_CTX", payload: { q, checkIn, ... } }
     if (message.type === 'PREFETCH_CTX') {
         const payload = message.payload || {};
-        console.log('bookDirect: PREFETCH_CTX payload:', payload);
+        Logger.debug('PREFETCH_CTX payload:', payload);
 
         const prefetchUrl = new URL(`${WORKER_BASE_URL}/prefetchCtx`);
         prefetchUrl.searchParams.set('q', payload.q || '');
@@ -311,12 +378,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         prefetchUrl.searchParams.set('gl', normGl(payload.gl));
         prefetchUrl.searchParams.set('hl', payload.hl || 'en-US');
 
-        console.log('bookDirect: Calling /prefetchCtx', prefetchUrl.toString());
+        Logger.debug('Calling /prefetchCtx', prefetchUrl.toString());
 
         fetch(prefetchUrl.toString())
             .then(res => res.json())
             .then(async (data) => {
-                console.log('bookDirect: Prefetch result:', data);
+                Logger.debug('Prefetch result:', data);
                 if (data.ok && data.ctxId) {
                     // Store ctxId by both tabId (primary) and itinerary key (fallback)
                     await storeCtxId(payload, data.ctxId, tabId);
@@ -326,7 +393,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
             })
             .catch(err => {
-                console.error('bookDirect: Prefetch error', err);
+                Logger.error('Prefetch error', err);
                 sendResponse({ ok: false, error: err.message });
             });
 
@@ -341,7 +408,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const oldUrl = context.officialUrl;
                 context.officialUrl = message.officialUrl;
                 tabContexts.set(tabId, context);
-                console.log('bookDirect: Set officialUrl for tab', tabId, message.officialUrl);
+                Logger.debug('Set officialUrl for tab', tabId, message.officialUrl);
 
                 // Check if we should trigger a retry
                 if (message.officialUrl && !oldUrl) {
@@ -351,7 +418,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                         // Trigger retry with officialUrl (but keep caches/ctx enabled)
                         // NOTE: forceRefresh=false preserves ctx lookup, refresh=1 is for manual user action only
-                        console.log('bookDirect: Auto-retrying compare with officialUrl (keeping caches)');
+                        Logger.debug('Auto-retrying compare with officialUrl (keeping caches)');
                         fetchCompareDeduped(tabId, params, false).then(data => {
                             if (!data.error) {
                                 setCachedCompare(tabId, params, data);
@@ -388,7 +455,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 if (TRANSIENT_CODES.includes(response.status) && retries > 0) {
                     // Jittered backoff: 500-800ms
                     const delay = 500 + Math.random() * 300;
-                    console.warn(`bookDirect: Hotel details HTTP ${response.status}, retrying in ${Math.round(delay)}ms...`);
+                    Logger.warn(`Hotel details HTTP ${response.status}, retrying in ${Math.round(delay)}ms...`);
                     await new Promise(r => setTimeout(r, delay));
                     return fetchWithRetry(url, retries - 1);
                 }
@@ -403,9 +470,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // Use console.warn for transient errors, console.error for real failures
                 const isTransient = err.message && /HTTP (502|503|429)/.test(err.message);
                 if (isTransient) {
-                    console.warn('bookDirect: Hotel details fetch failed (transient):', err.message);
+                    Logger.warn('Hotel details fetch failed (transient):', err.message);
                 } else {
-                    console.error('bookDirect: Hotel details fetch failed:', err);
+                    Logger.error('Hotel details fetch failed:', err);
                 }
                 sendResponse({ error: err.message || 'Fetch failed' });
             });
@@ -420,7 +487,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!context) {
             // Request content script to resend page context (it may have been lost on extension reload)
             if (tabId) {
-                console.log('bookDirect: No page context, requesting resend from tab', tabId);
+                Logger.debug('No page context, requesting resend from tab', tabId);
                 chrome.tabs.sendMessage(tabId, { type: 'RESEND_PAGE_CONTEXT' }).catch(() => { });
             }
             sendResponse({ error: 'No page context available' });
@@ -445,7 +512,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!message.forceRefresh) {
             const cached = getCachedCompare(tabId, params);
             if (cached) {
-                console.log('bookDirect: Returning cached compare data');
+                Logger.debug('Returning cached compare data');
                 sendResponse({ ...cached, cache: 'hit' });
                 return false;
             }
@@ -492,7 +559,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!isSystemRefresh && now < cooldownUntil) {
             const cached = getCachedCompare(tabId, params);
             if (cached) {
-                console.log('bookDirect: Force refresh throttled, returning cached');
+                Logger.debug('Force refresh throttled, returning cached');
                 sendResponse({ ...cached, throttled: true, retryAfterMs: cooldownUntil - now });
                 return false;
             }
@@ -527,6 +594,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Clean up when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
     tabContexts.delete(tabId);
+    tabCtxIds.delete(tabId); // Clean up in-memory ctxId map
 
     // Clean up any cached/tracked data for this tab
     for (const key of compareCache.keys()) {
