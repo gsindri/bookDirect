@@ -713,6 +713,22 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         color: #7c3aed;
       }
 
+      .compare-badge.matched {
+        background: rgba(59, 130, 246, 0.12);
+        color: #2563eb;
+      }
+
+      .compare-badge.other-room {
+        background: rgba(107, 114, 128, 0.1);
+        color: #6b7280;
+        font-size: 9px;
+      }
+
+      .compare-row-secondary {
+        opacity: 0.75;
+        font-size: 12px;
+      }
+
       .compare-savings {
         display: flex;
         align-items: center;
@@ -1982,10 +1998,12 @@ Best regards,`;
     return best && best.score >= 0.5 ? best : null;
   }
 
-  // Compute room-aware comparison data
   function computeRoomAwareComparison(data) {
     const totalSelectedRooms = (_selectedRooms || []).reduce((s, r) => s + (r.count || 0), 0);
     const singleSelection = totalSelectedRooms === 1 ? _selectedRooms[0] : null;
+
+    // DEBUG: Log selected rooms state
+    console.log('bookDirect: _selectedRooms state:', { _selectedRooms, totalSelectedRooms, singleSelection });
 
     // Multi-room: check if all selected rooms are the same type
     let multiRoomSameName = null;
@@ -2202,26 +2220,60 @@ Best regards,`;
       `;
     }
 
-    // Cheapest overall
-    if (cheapestOverall) {
-      const sourceLabel = cheapestOverall.source || 'Best price';
-      const priceLink = cheapestOverall.link
-        ? `<a href="${cheapestOverall.link}" target="_blank" rel="noopener">${formatComparePrice(cheapestOverall.total, currency)}</a>`
-        : formatComparePrice(cheapestOverall.total, currency);
+    // --- ROOM-AWARE COMPARISON (moved earlier to use in cheapest display) ---
+    const roomComparison = computeRoomAwareComparison(data);
+    console.log('bookDirect: Room comparison:', roomComparison);
+
+    // Determine what to show as "cheapest" - room-matched price vs overall cheapest
+    const isRoomMatched = roomComparison.type === 'matched' || roomComparison.type === 'matched-multi';
+
+    // When room is matched, show the matched room's offer as comparison
+    // Otherwise fall back to overall cheapest
+    const displayOffer = isRoomMatched ? roomComparison.matchedOffer : cheapestOverall;
+    const displayTotal = isRoomMatched ? roomComparison.matchedTotal : cheapestOverall?.total;
+    const displayRoom = isRoomMatched ? roomComparison.matchedRoom : null;
+
+    // Cheapest display (room-matched when available, otherwise overall)
+    if (displayOffer || displayTotal) {
+      const sourceLabel = displayOffer?.source || 'Best price';
+      const roomLabel = displayRoom?.name ? ` – ${displayRoom.name.slice(0, 25)}${displayRoom.name.length > 25 ? '…' : ''}` : '';
+      const displayLink = displayRoom?.link || displayOffer?.link;
+      const priceLink = displayLink
+        ? `<a href="${displayLink}" target="_blank" rel="noopener">${formatComparePrice(displayTotal, currency)}</a>`
+        : formatComparePrice(displayTotal, currency);
 
       // Build badges array
-      const badges = ['<span class="compare-badge cheapest">Cheapest</span>'];
-      for (const b of (cheapestOverall.badges || [])) {
+      const badges = [];
+      if (isRoomMatched) {
+        badges.push('<span class="compare-badge matched">Same Room</span>');
+      }
+      badges.push('<span class="compare-badge cheapest">Cheapest</span>');
+      for (const b of (displayOffer?.badges || [])) {
         badges.push(`<span class="compare-badge ${b.toLowerCase()}">${b}</span>`);
       }
 
       html += `
         <div class="compare-row">
-          <div class="compare-source is-cheapest" title="${sourceLabel}">${sourceLabel}</div>
+          <div class="compare-source is-cheapest" title="${sourceLabel}${roomLabel}">${sourceLabel}</div>
           <div class="compare-price">${priceLink}</div>
           <div class="compare-tags">${badges.join('')}</div>
         </div>
       `;
+
+      // If room matched, also show overall cheapest if different and cheaper
+      if (isRoomMatched && cheapestOverall && cheapestOverall.total < displayTotal) {
+        const overallLink = cheapestOverall.link
+          ? `<a href="${cheapestOverall.link}" target="_blank" rel="noopener">${formatComparePrice(cheapestOverall.total, currency)}</a>`
+          : formatComparePrice(cheapestOverall.total, currency);
+
+        html += `
+          <div class="compare-row compare-row-secondary">
+            <div class="compare-source" title="${cheapestOverall.source} (different room type)">${cheapestOverall.source}</div>
+            <div class="compare-price">${overallLink}</div>
+            <div class="compare-tags"><span class="compare-badge other-room">Other Room</span></div>
+          </div>
+        `;
+      }
     }
 
     // Official site (if different from cheapest)
@@ -2260,9 +2312,7 @@ Best regards,`;
     // Google's Booking.com price from compare data
     const googleBookingTotal = bookingOffer?.total ?? currentOtaOffer?.total ?? null;
 
-    // --- ROOM-AWARE COMPARISON ---
-    const roomComparison = computeRoomAwareComparison(data);
-    console.log('bookDirect: Room comparison:', roomComparison);
+    // (roomComparison already computed earlier at line 2053)
 
     // Choose baseline - prefer room-matched comparison when available
     let baselineTotal = null;
@@ -2294,8 +2344,29 @@ Best regards,`;
       roomNote = roomName ? ` (${roomName.slice(0, 30)}${roomName.length > 30 ? '...' : ''})` : '';
     }
 
-    if (cheapestOverall && baselineTotal && cheapestOverall.total < baselineTotal && !_currentMismatch) {
-      const savings = baselineTotal - cheapestOverall.total;
+    // --- DEBUG: Savings calculation inputs ---
+    console.log('bookDirect: Savings calc inputs:', {
+      _price,
+      viewingTotal,
+      googleBookingTotal,
+      baselineTotal,
+      cheapestOverallTotal: cheapestOverall?.total,
+      displayTotal,
+      isRoomMatched,
+      _currentMismatch,
+      wouldShowSavings: displayTotal && baselineTotal && displayTotal < baselineTotal && !_currentMismatch,
+    });
+
+    // Calculate savings using room-matched price when available, otherwise overall cheapest
+    const savingsCompareTotal = displayTotal ?? cheapestOverall?.total;
+    if (savingsCompareTotal && baselineTotal && savingsCompareTotal < baselineTotal && !_currentMismatch) {
+      const savings = baselineTotal - savingsCompareTotal;
+      console.log('bookDirect: Savings calculation:', {
+        savings,
+        currency,
+        comparedTo: isRoomMatched ? 'room-matched' : 'cheapest-overall',
+        isMeaningful: isMeaningfulSavings(savings, baselineTotal, currency)
+      });
 
       // Only show savings callout if meaningful (>=1.5% or above currency minimum)
       if (isMeaningfulSavings(savings, baselineTotal, currency)) {
