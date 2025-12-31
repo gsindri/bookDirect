@@ -1745,6 +1745,132 @@ Best regards,`;
     return Number.isFinite(num) && num > 0 ? num : NaN;
   }
 
+  // --- ROOM MATCHING HELPERS (for like-for-like comparison) ---
+
+  // Parse selected rooms from _roomDetails string (e.g., "2 x Deluxe Double Room • 1 x Suite")
+  function parseSelectedRoomsFromDetails(details) {
+    if (!details || typeof details !== 'string') return [];
+
+    return details
+      .split('•')
+      .map(s => s.trim())
+      .map(part => {
+        const m = part.match(/^(\d+)\s*x\s*(.+)$/i);
+        if (!m) return null;
+
+        const count = parseInt(m[1], 10) || 1;
+        let name = (m[2] || '').trim();
+
+        // Remove trailing "(~ISK 12,345)" price annotation
+        name = name.replace(/\(\s*~[^)]*\)\s*$/i, '').trim();
+        // Remove "(Breakfast included)" suffix
+        name = name.replace(/\(Breakfast included\)/i, '').trim();
+        // Normalize whitespace
+        name = name.replace(/\s+/g, ' ').trim();
+
+        if (!name) return null;
+        return { count, name };
+      })
+      .filter(Boolean);
+  }
+
+  // Normalize room name for fuzzy matching
+  function normalizeRoomName(name) {
+    return (name || '')
+      .toLowerCase()
+      .replace(/\([^)]*\)/g, ' ')      // Remove parentheticals
+      .replace(/[^a-z0-9]+/g, ' ')     // Keep only alphanumeric
+      .replace(/\b(room|rooms|the|and|or|with|without|a|an|of|to|in)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Jaccard similarity score between two room names
+  function roomNameScore(a, b) {
+    const A = normalizeRoomName(a).split(' ').filter(Boolean);
+    const B = normalizeRoomName(b).split(' ').filter(Boolean);
+    if (!A.length || !B.length) return 0;
+
+    const setA = new Set(A);
+    const setB = new Set(B);
+
+    let inter = 0;
+    for (const t of setA) if (setB.has(t)) inter++;
+
+    const union = setA.size + setB.size - inter;
+    return union ? inter / union : 0;
+  }
+
+  // Find best matching room from provider's room list
+  function bestRoomMatch(selectedName, providerRooms) {
+    let best = null;
+    let bestScore = 0;
+
+    for (const r of providerRooms || []) {
+      if (!r?.name || typeof r?.total !== 'number') continue;
+      const s = roomNameScore(selectedName, r.name);
+      if (s > bestScore) {
+        bestScore = s;
+        best = r;
+      }
+    }
+
+    return best ? { room: best, score: bestScore } : null;
+  }
+
+  // Compute total for selected rooms from a single offer
+  function offerTotalForSelection(offer, selections) {
+    if (!offer || !Array.isArray(offer.rooms) || offer.rooms.length === 0) return null;
+
+    let total = 0;
+    const matched = [];
+
+    for (const sel of selections) {
+      const m = bestRoomMatch(sel.name, offer.rooms);
+      if (!m || m.score < 0.30) return null; // Threshold for match quality
+
+      total += (m.room.total * sel.count);
+      matched.push({
+        selected: sel.name,
+        provider: m.room.name,
+        perRoomTotal: m.room.total,
+        count: sel.count,
+        link: m.room.link || offer.link,
+        score: m.score
+      });
+    }
+
+    const link = matched.length === 1 ? matched[0].link : offer.link;
+    return { total, matched, link };
+  }
+
+  // Find cheapest offer for selected room(s) across all providers
+  function cheapestOfferForSelection(offers, selections, currentHost) {
+    let best = null;
+
+    for (const o of offers || []) {
+      // Skip Booking.com itself when comparing to Booking
+      if (currentHost && currentHost.includes('booking') &&
+        (o.source || '').toLowerCase().includes('booking')) {
+        continue;
+      }
+
+      const calc = offerTotalForSelection(o, selections);
+      if (!calc) continue;
+
+      if (!best || calc.total < best.total) {
+        best = {
+          offer: o,
+          total: calc.total,
+          matched: calc.matched,
+          link: calc.link
+        };
+      }
+    }
+
+    return best;
+  }
+
   // --- BOOK DIRECT URL HELPERS ---
   function isHttpUrl(u) {
     try { const x = new URL(u); return x.protocol === 'http:' || x.protocol === 'https:'; }
@@ -2034,7 +2160,36 @@ Best regards,`;
     }
 
     const currency = data.query?.currency || 'USD';
-    const { cheapestOverall, cheapestOfficial, currentOtaOffer, bookingOffer } = data;
+    const currentHost = data.query?.currentHost || '';
+    let { cheapestOverall, cheapestOfficial, currentOtaOffer, bookingOffer } = data;
+
+    // --- SELECTION-AWARE CHEAPEST ---
+    // Parse selected rooms and find cheapest provider for those exact rooms
+    const selections = parseSelectedRoomsFromDetails(_roomDetails);
+    let selectionCheapest = null;
+    let usingRoomMatch = false;
+
+    if (selections.length && Array.isArray(data.offers)) {
+      selectionCheapest = cheapestOfferForSelection(data.offers, selections, currentHost);
+
+      if (selectionCheapest) {
+        console.log('bookDirect: Room-matched cheapest found:', {
+          provider: selectionCheapest.offer.source,
+          total: selectionCheapest.total,
+          matched: selectionCheapest.matched
+        });
+
+        // Replace cheapestOverall with selection-aware version
+        cheapestOverall = {
+          ...selectionCheapest.offer,
+          total: selectionCheapest.total,
+          totalText: formatComparePrice(selectionCheapest.total, currency),
+          link: selectionCheapest.link || selectionCheapest.offer.link,
+          roomMatch: selectionCheapest.matched
+        };
+        usingRoomMatch = true;
+      }
+    }
 
     let html = '';
 
