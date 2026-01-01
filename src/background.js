@@ -217,12 +217,18 @@ async function fetchCompare(params, forceRefresh = false, tabId = null) {
         const response = await fetch(url.toString());
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            Logger.error('Compare API error response:', response.status, JSON.stringify(errorData));
+            // Capture raw text first (handles HTML error pages from Cloudflare)
+            const text = await response.text().catch(() => '');
+            Logger.error('Compare API error response:', response.status, text.slice(0, 800));
+
+            let parsed = {};
+            try { parsed = JSON.parse(text); } catch { }
+
             return {
-                error: errorData.error || `API error: ${response.status}`,
+                error: parsed.error || `API error: ${response.status}`,
                 status: response.status,
-                details: errorData
+                details: parsed,
+                rawBody: text.slice(0, 500)  // Include raw for debugging
             };
         }
 
