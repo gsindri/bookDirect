@@ -1751,7 +1751,7 @@ Best regards,`;
       } catch (e) {
         Logger.error('Rerender error', e);
       }
-    }, 180);
+    }, BookDirect.Contracts.COMPARE_RERENDER_DEBOUNCE_MS);
   }
 
   // Get DOM elements for compare section
@@ -2613,15 +2613,16 @@ Best regards,`;
     }
   };
 
-  // Fallback: if officialUrl not received after 3500ms, call compare anyway
+  // Fallback: if officialUrl not received after OFFICIAL_URL_WAIT_MS, call compare anyway
+  const officialUrlTimeout = BookDirect.Contracts.OFFICIAL_URL_WAIT_MS;
   setTimeout(() => {
     if (_waitingForOfficialUrl && !_compareCalledOnce) {
-      console.log('bookDirect: officialUrl timeout (3500ms), calling compare without it');
+      console.log(`bookDirect: officialUrl timeout (${officialUrlTimeout}ms), calling compare without it`);
       _compareCalledOnce = true;
       _compareUsedOfficialUrl = false; // Ran WITHOUT officialUrl - may need upgrade later
       fetchCompareData();
     }
-  }, 3500);
+  }, officialUrlTimeout);
 
   // Expose update methods (DOM-based, XSS-safe)
   container.updatePrice = function (newPrice) {
