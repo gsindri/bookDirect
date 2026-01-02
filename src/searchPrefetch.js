@@ -59,27 +59,30 @@
     }
 
     function sendPrefetchMessage(payload) {
-        try {
-            if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.id) {
-                log("PREFETCH_CTX: extension context not available");
+        // Use shared contracts and messaging helpers
+        const C = globalThis.BookDirect?.Contracts;
+        const M = globalThis.BookDirect?.Messaging;
+
+        if (!C || !M) {
+            log("PREFETCH_CTX: BookDirect globals not loaded");
+            return;
+        }
+
+        if (!M.isAvailable()) {
+            log("PREFETCH_CTX: extension context not available");
+            return;
+        }
+
+        M.sendMessageAsync({ type: C.MSG_PREFETCH_CTX, payload }).then(resp => {
+            if (resp?.error) {
+                log("PREFETCH_CTX send failed:", resp.error);
                 return;
             }
-
-            chrome.runtime.sendMessage({ type: "PREFETCH_CTX", payload }, (resp) => {
-                if (chrome.runtime.lastError) {
-                    log("PREFETCH_CTX send failed:", chrome.runtime.lastError.message);
-                    return;
-                }
-
-                log("PREFETCH_CTX response:", resp);
-
-                // IMPORTANT:
-                // Do NOT store ctxId in sessionStorage.
-                // Background already stores ctxId in chrome.storage.session keyed by itinerary+tab.
-            });
-        } catch (e) {
-            log("PREFETCH_CTX exception:", e);
-        }
+            log("PREFETCH_CTX response:", resp);
+            // IMPORTANT:
+            // Do NOT store ctxId in sessionStorage.
+            // Background already stores ctxId in chrome.storage.session keyed by itinerary+tab.
+        });
     }
 
     if (!isSearchResultsPage()) return;

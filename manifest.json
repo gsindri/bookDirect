@@ -14,7 +14,8 @@
         "https://hotelfinder.gsindrih.workers.dev/*"
     ],
     "background": {
-        "service_worker": "src/background.js"
+        "service_worker": "src/background.js",
+        "type": "module"
     },
     "content_scripts": [
         {
@@ -23,6 +24,8 @@
             ],
             "js": [
                 "src/logger.js",
+                "src/shared/contracts.global.js",
+                "src/shared/messaging.global.js",
                 "src/searchPrefetch.js"
             ],
             "run_at": "document_start"
@@ -33,6 +36,9 @@
             ],
             "js": [
                 "src/logger.js",
+                "src/shared/contracts.global.js",
+                "src/shared/messaging.global.js",
+                "src/shared/money.global.js",
                 "src/components/OverflowDiagnostics.js",
                 "src/components/PriceCheckUI.js",
                 "src/content.js"

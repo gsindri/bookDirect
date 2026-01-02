@@ -1390,7 +1390,7 @@
 
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
             chrome.runtime.sendMessage({
-                type: 'BOOKDIRECT_PAGE_CONTEXT',
+                type: BookDirect.Contracts.MSG_BOOKDIRECT_PAGE_CONTEXT,
                 payload: itinerary
             });
         }
@@ -1399,7 +1399,7 @@
     // Listen for messages from background to resend page context
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
         chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-            if (message.type === 'RESEND_PAGE_CONTEXT') {
+            if (message.type === BookDirect.Contracts.MSG_RESEND_PAGE_CONTEXT) {
                 console.log('bookDirect: Resending page context on request');
                 sendPageContext();
                 sendResponse({ sent: true });

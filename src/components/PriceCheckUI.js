@@ -1440,7 +1440,7 @@ Best regards,`;
                       return;
                     }
 
-                    chrome.runtime.sendMessage({ type: 'ACTION_CAPTURE_VISIBLE_TAB' }, async (response) => {
+                    chrome.runtime.sendMessage({ type: BookDirect.Contracts.MSG_ACTION_CAPTURE_VISIBLE_TAB }, async (response) => {
                       clearTimeout(safetyTimeout);
                       doCleanup(); // Always cleanup after capture attempt
 
@@ -1690,7 +1690,7 @@ Best regards,`;
       try {
         data = await new Promise((resolve, reject) => {
           chrome.runtime.sendMessage({
-            type: 'GET_HOTEL_DETAILS',
+            type: BookDirect.Contracts.MSG_GET_HOTEL_DETAILS,
             query: _hotelName
           }, (response) => {
             if (chrome.runtime.lastError) {
@@ -1812,55 +1812,8 @@ Best regards,`;
 
   // Helper: Parse price string to number (locale-aware, handles decimals correctly)
   // Handles: "$1,234.56" -> 1234.56, "€ 1.234,56" -> 1234.56, "ISK 25,103" -> 25103
-  function parseMoneyToNumber(val) {
-    if (val == null) return NaN;
-    if (typeof val === "number" && Number.isFinite(val)) return val;
-
-    const s = String(val).trim();
-    if (!s) return NaN;
-
-    // Keep digits, comma, dot, minus. Remove currency symbols and spaces.
-    let cleaned = s.replace(/[^\d.,-]/g, "").replace(/\s+/g, "");
-    if (!cleaned) return NaN;
-
-    const lastDot = cleaned.lastIndexOf(".");
-    const lastComma = cleaned.lastIndexOf(",");
-    let normalized = cleaned;
-
-    // If both exist, the last one is probably the decimal separator.
-    if (lastDot !== -1 && lastComma !== -1) {
-      if (lastDot > lastComma) {
-        // dot decimal, commas thousands (e.g., "1,234.56")
-        normalized = cleaned.replace(/,/g, "");
-      } else {
-        // comma decimal, dots thousands (e.g., "1.234,56")
-        normalized = cleaned.replace(/\./g, "").replace(/,/g, ".");
-      }
-    } else if (lastComma !== -1) {
-      // Only comma
-      const digitsAfter = cleaned.length - lastComma - 1;
-      if (digitsAfter === 2) {
-        // Likely decimal (e.g., "1234,56")
-        normalized = cleaned.replace(/,/g, ".");
-      } else {
-        // Likely thousands (e.g., "1,234")
-        normalized = cleaned.replace(/,/g, "");
-      }
-    } else if (lastDot !== -1) {
-      // Only dot
-      const digitsAfter = cleaned.length - lastDot - 1;
-      if (digitsAfter === 2) {
-        // Likely decimal (e.g., "1234.56")
-        normalized = cleaned;
-      } else {
-        // Likely thousands (e.g., "1.234")
-        normalized = cleaned.replace(/\./g, "");
-      }
-    }
-
-    const n = Number(normalized);
-    return Number.isFinite(n) ? n : NaN;
-  }
+  // Use shared money parsing from BookDirect.Money (loaded from money.global.js)
+  const parseMoneyToNumber = BookDirect.Money.parseMoneyToNumber;
 
   // --- ROOM MATCHING HELPERS (for like-for-like comparison) ---
 
@@ -2013,6 +1966,16 @@ Best regards,`;
   function isValidDirectLink(u) {
     return isHttpUrl(u) && !isGoogleTrackingUrl(u) && !isKnownOtaUrl(u);
   }
+
+  // Extract hostname without www prefix for domain comparison
+  function hostNoWww(u) {
+    try {
+      return new URL(u).hostname.replace(/^www\./, '').toLowerCase();
+    } catch {
+      return '';
+    }
+  }
+
 
   // Pick best official URL from compare data
   function pickBestOfficialUrl(data) {
@@ -2169,26 +2132,57 @@ Best regards,`;
     // Use match.matchedHotelName, or fall back to property.name (cached responses may not have matchedHotelName)
     const matchedHotelName = data.match?.matchedHotelName || data.matchedHotelName || data.property?.name || null;
     const mismatchCheck = checkNameMismatch(_hotelName, matchedHotelName);
-    const isLowConfidence = (data.match?.confidence ?? 1) < 0.4;
+
+    // Split confidence/uncertainty handling for nuanced UI
+    const confidence = (data.match?.confidence ?? 1);
+    const matchUncertain = !!(data.match?.matchUncertain || data.matchUncertain);
+    const isLowConfidence = confidence < 0.4;
+
+    // Hard mismatch: name-based (coverage < 0.5 or missing key tokens)
+    // Soft uncertainty: low confidence or matchUncertain flag, but names are OK
+    const hardMismatch = mismatchCheck.isMismatch;
+    const softUncertain = !hardMismatch && (isLowConfidence || matchUncertain);
+
+    _currentMismatch = hardMismatch || softUncertain;
+
+    // Control flags for rendering
+    const allowPriceRows = !hardMismatch;      // Hard mismatch = don't show any prices
+    const allowStrongClaims = !_currentMismatch; // Only claim savings when fully confident
 
     // Debug: Log mismatch detection values
     Logger.debug('Mismatch detection:', {
       searchedHotel: _hotelName,
       matchedHotel: matchedHotelName,
-      isMismatch: mismatchCheck.isMismatch,
-      confidence: data.match?.confidence,
+      hardMismatch,
+      softUncertain,
+      confidence,
       isLowConfidence,
-      matchUncertain: data.matchUncertain
+      matchUncertain,
+      allowPriceRows,
+      allowStrongClaims
     });
 
-    _currentMismatch = mismatchCheck.isMismatch || isLowConfidence || data.matchUncertain;
-
-    // --- UPGRADE BOOK DIRECT URL ---
-    // Try to find a better official link from compare data (deep link > homepage > hotelDetails)
+    // --- UPGRADE BOOK DIRECT URL (with domain confirmation safety belt) ---
+    // Only upgrade when confident, OR when domains match (extra layer check)
     const betterUrl = pickBestOfficialUrl(data);
     if (betterUrl && betterUrl.url !== _bookDirectUrl) {
-      updateBookDirectButton(betterUrl.url, betterUrl.source);
+      // Domain confirmation: if official URL matches compare URL domain, trust it
+      const officialHost = hostNoWww(_officialUrl);
+      const betterHost = hostNoWww(betterUrl.url);
+      const domainConfirmsMatch = officialHost && betterHost && officialHost === betterHost;
+
+      // Upgrade only if confident OR domain confirms
+      if (!_currentMismatch || domainConfirmsMatch) {
+        updateBookDirectButton(betterUrl.url, betterUrl.source);
+      } else {
+        Logger.debug('Skipping Book Direct URL upgrade due to mismatch/uncertainty:', {
+          betterUrl: betterUrl.url,
+          _currentMismatch,
+          domainConfirmsMatch
+        });
+      }
     }
+
 
     const currency = data.query?.currency || 'USD';
     const currentHost = data.query?.currentHost || '';
@@ -2223,18 +2217,18 @@ Best regards,`;
     }
 
     let html = '';
+    let hasAnyRows = false;  // Track if any price rows were rendered
 
     // Show mismatch warning at top if detected (escaped for XSS safety)
     if (_currentMismatch && matchedHotelName) {
       html += `
         <div class="compare-mismatch-warning">
-          ⚠️ Prices may be for: <strong>${escHtml(matchedHotelName)}</strong>
+          ⚠️ ${hardMismatch ? 'Prices may be for:' : 'Match uncertain — prices may be for:'}
+          <strong>${escHtml(matchedHotelName)}</strong>
         </div>
       `;
-
-      // CRITICAL: If mismatch is detected, do NOT treat this as a valid "cheaper" offer
-      // This prevents misleading "Cheaper" badges on wrong hotels
-      cheapestOverall = null;
+      // Note: We no longer null cheapestOverall here.
+      // Hard mismatch suppresses rows via allowPriceRows; soft uncertainty shows rows with "Unconfirmed" badge.
     }
 
     // Parse the visible page price EARLY (needed for smart badge display)
@@ -2261,7 +2255,8 @@ Best regards,`;
     const displayHasGate = displayBadges.some(b => ['Member', 'Login', 'Mobile'].includes(b));
 
     // Cheapest display (room-matched when available, otherwise overall)
-    if (displayOffer || displayTotal) {
+    // Only render price rows if not a hard mismatch
+    if (allowPriceRows && (displayOffer || displayTotal)) {
       const sourceLabel = displayOffer?.source || 'Best price';
       const roomLabel = displayRoomName
         ? ` – ${displayRoomName.slice(0, 25)}${displayRoomName.length > 25 ? '…' : ''}`
@@ -2289,7 +2284,11 @@ Best regards,`;
           : '<span class="compare-badge matched">Same Room</span>');
       }
 
-      if (isActuallyCheaper) {
+      // Cheap/best badges: suppress when uncertain (show "Unconfirmed" instead)
+      if (_currentMismatch) {
+        // Don't claim savings when uncertain
+        badges.push('<span class="compare-badge other-room">Unconfirmed</span>');
+      } else if (isActuallyCheaper) {
         // This offer IS cheaper than Booking.com
         badges.push('<span class="compare-badge cheapest">Cheaper</span>');
       } else if (bookingIsBest) {
@@ -2303,8 +2302,8 @@ Best regards,`;
         badges.push(`<span class="compare-badge ${safeClassToken(b)}">${escHtml(b)}</span>`);
       }
 
-      // Only highlight as cheapest (green) if it actually IS cheaper
-      const sourceClass = isActuallyCheaper ? 'compare-source is-cheapest' : 'compare-source';
+      // Only highlight as cheapest (green) if it actually IS cheaper AND we're confident
+      const sourceClass = (!_currentMismatch && isActuallyCheaper) ? 'compare-source is-cheapest' : 'compare-source';
 
       html += `
         <div class="compare-row">
@@ -2313,6 +2312,7 @@ Best regards,`;
           <div class="compare-tags">${badges.join('')}</div>
         </div>
       `;
+      hasAnyRows = true;
 
       // If room matched, also show overall cheapest if different and cheaper
       if (isRoomMatched && cheapestOverall && cheapestOverall.total < displayTotal) {
@@ -2328,6 +2328,7 @@ Best regards,`;
             <div class="compare-tags"><span class="compare-badge other-room">Other Room</span></div>
           </div>
         `;
+        hasAnyRows = true;
       }
 
       // --- MEMBER/LOGIN GATE NOTE (always visible when relevant) ---
@@ -2342,7 +2343,8 @@ Best regards,`;
     }
 
     // Official site (if different from the displayed offer)
-    if (cheapestOfficial && cheapestOfficial.source !== displayOffer?.source) {
+    // Also gated by allowPriceRows to suppress on hard mismatch
+    if (allowPriceRows && cheapestOfficial && cheapestOfficial.source !== displayOffer?.source) {
       const fullSourceName = cheapestOfficial.source || 'Official Site';
       const officialSafeLink = safeHttpUrl(cheapestOfficial.link);
       const priceLink = officialSafeLink
@@ -2362,6 +2364,7 @@ Best regards,`;
           <div class="compare-tags">${badges.join('')}</div>
         </div>
       `;
+      hasAnyRows = true;
     }
 
     // NOTE: Removed duplicate 'Booking.com (viewing)' row - already shown in hero section above
@@ -2403,13 +2406,15 @@ Best regards,`;
       cheapestOverallTotal: cheapestOverall?.total,
       displayTotal,
       isRoomMatched,
-      _currentMismatch,
-      wouldShowSavings: displayTotal && baselineTotal && displayTotal < baselineTotal && !_currentMismatch,
+      allowPriceRows,
+      allowStrongClaims,
+      wouldShowSavings: displayTotal && baselineTotal && displayTotal < baselineTotal && allowStrongClaims,
     });
 
     // Calculate savings using room-matched price when available, otherwise overall cheapest
+    // Only show savings when we're confident in the match (allowStrongClaims)
     const savingsCompareTotal = displayTotal ?? cheapestOverall?.total;
-    if (savingsCompareTotal && baselineTotal && savingsCompareTotal < baselineTotal && !_currentMismatch) {
+    if (allowPriceRows && savingsCompareTotal && baselineTotal && savingsCompareTotal < baselineTotal && allowStrongClaims) {
       const savings = baselineTotal - savingsCompareTotal;
       console.log('bookDirect: Savings calculation:', {
         savings,
@@ -2433,8 +2438,9 @@ Best regards,`;
       // If savings are trivial, just show nothing (cleaner than a preachy message)
     }
 
-    if (!html) {
-      html = '<div class="compare-no-dates">No price data found.</div>';
+    // Show "no prices" if no rows were rendered (warning alone doesn't count)
+    if (!hasAnyRows) {
+      html += '<div class="compare-no-dates">No price data found.</div>';
     }
 
     compareResults.innerHTML = html;
@@ -2459,7 +2465,7 @@ Best regards,`;
     try {
       const response = await new Promise((resolve, reject) => {
         chrome.runtime.sendMessage({
-          type: forceRefresh ? 'REFRESH_COMPARE' : 'GET_COMPARE_DATA',
+          type: forceRefresh ? BookDirect.Contracts.MSG_REFRESH_COMPARE : BookDirect.Contracts.MSG_GET_COMPARE_DATA,
           officialUrl: _officialUrl,
           forceRefresh,
           hotelName: _hotelName,
@@ -2490,30 +2496,54 @@ Best regards,`;
 
       if (response?.error) {
         console.warn('bookDirect: Compare API error:', response.error, response);
+        const C = BookDirect.Contracts;
+        const errorCode = response.error_code;
 
         // Retry once for 'No page context' error (race condition on page load)
-        if (response.error.includes('No page context') && !opts._retried) {
+        if (errorCode === C.ERR_NO_PAGE_CONTEXT && !opts._retried) {
           console.log('bookDirect: Retrying after 500ms (waiting for page context)');
           await new Promise(r => setTimeout(r, 500));
           return fetchCompareData(forceRefresh, { ...opts, _retried: true });
         }
 
-        // User-friendly error messages
+        // User-friendly error messages based on error_code
         let userMessage = 'Unable to compare prices.';
-        if (response.error.includes('google_hotels failed')) {
-          // Check if it's "no results" vs actual API failure
-          const detailsStr = JSON.stringify(response.details || '').toLowerCase();
-          if (detailsStr.includes("didn't return any results") || detailsStr.includes('no results')) {
-            userMessage = 'Hotel not found in Google Hotels database.';
-          } else {
-            userMessage = 'Price data temporarily unavailable. Try refreshing.';
-          }
-        } else if (response.error.includes('Rate limit')) {
-          userMessage = 'Too many requests. Please wait a moment.';
-        } else if (response.error.includes('No property_token')) {
-          userMessage = 'Hotel not found in price database.';
-        } else if (response.error.includes('No page context')) {
-          userMessage = 'Page not ready. Try refreshing.';
+        switch (errorCode) {
+          case C.ERR_SEARCH_FAILED:
+            // Check if it's "no results" vs actual API failure
+            const detailsStr = JSON.stringify(response.details || '').toLowerCase();
+            if (detailsStr.includes("didn't return any results") || detailsStr.includes('no results')) {
+              userMessage = 'Hotel not found in Google Hotels database.';
+            } else {
+              userMessage = 'Price data temporarily unavailable. Try refreshing.';
+            }
+            break;
+          case C.ERR_RATE_LIMIT:
+            userMessage = 'Too many requests. Please wait a moment.';
+            break;
+          case C.ERR_NO_PROPERTY_FOUND:
+            userMessage = 'Hotel not found in price database.';
+            break;
+          case C.ERR_NO_PAGE_CONTEXT:
+            userMessage = 'Page not ready. Try refreshing.';
+            break;
+          case C.ERR_INVALID_PARAMS:
+            userMessage = 'Invalid request parameters.';
+            break;
+          case C.ERR_NETWORK:
+            userMessage = 'Network error. Check your connection.';
+            break;
+          default:
+            // Fallback to old string matching for backwards compatibility
+            if (response.error.includes('google_hotels failed')) {
+              userMessage = 'Price data temporarily unavailable. Try refreshing.';
+            } else if (response.error.includes('Rate limit')) {
+              userMessage = 'Too many requests. Please wait a moment.';
+            } else if (response.error.includes('No property_token')) {
+              userMessage = 'Hotel not found in price database.';
+            } else if (response.error.includes('No page context')) {
+              userMessage = 'Page not ready. Try refreshing.';
+            }
         }
 
         compareError.textContent = userMessage;
@@ -2565,7 +2595,7 @@ Best regards,`;
     // Notify background about the officialUrl
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       chrome.runtime.sendMessage({
-        type: 'SET_OFFICIAL_URL',
+        type: BookDirect.Contracts.MSG_SET_OFFICIAL_URL,
         officialUrl: url
       });
     }
