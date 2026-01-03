@@ -61,7 +61,7 @@ const logError = (...args) => {
 // In-memory map of tabId -> ctxId (for fast opener propagation)
 const tabCtxIds = new Map();
 
-// In-flight requests (for dedupe) - key -> Promise
+// In-flight requests (for dedupe) - key -> { promise: Promise, forceRefresh: boolean }
 const inFlightRequests = new Map();
 
 // --- CREATE SERVICES ---
@@ -77,15 +77,32 @@ const workerClient = createWorkerClient({
     log
 });
 
-// --- IN-FLIGHT DEDUPE ---
-// If a request for the same key is in-flight, return the same promise instead of starting another
+// --- IN-FLIGHT DEDUPE (Race-Proof) ---
+// If a request for the same key is in-flight, return the same promise instead of starting another.
+// Upgraded to track forceRefresh to dedupe refresh spam while allowing refresh to upgrade normal requests.
 async function fetchCompareDeduped(tabId, params, forceRefresh = false) {
     const key = getCompareKey(tabId, params);
+    const existing = inFlightRequests.get(key);
 
-    // If already in-flight and not forcing refresh, return the existing promise
-    if (!forceRefresh && inFlightRequests.has(key)) {
-        log('Returning in-flight request for', key);
-        return inFlightRequests.get(key);
+    // Decision logic:
+    // 1. Normal request + existing in-flight -> return existing promise
+    // 2. Force refresh + existing force refresh in-flight -> return existing (dedupe refresh spam)
+    // 3. Force refresh + existing normal in-flight -> start new refresh (upgrade)
+    // 4. No existing -> start new request
+
+    if (existing) {
+        if (!forceRefresh) {
+            // Case 1: Normal request dedupes to any in-flight request
+            log('Returning in-flight request for', key);
+            return existing.promise;
+        }
+        if (existing.forceRefresh) {
+            // Case 2: Refresh dedupes to existing refresh (prevent refresh spam)
+            log('Returning in-flight refresh for', key, '(deduping refresh spam)');
+            return existing.promise;
+        }
+        // Case 3: Force refresh upgrades a normal in-flight request
+        log('Upgrading in-flight normal request to refresh for', key);
     }
 
     // Create new request promise
@@ -106,12 +123,16 @@ async function fetchCompareDeduped(tabId, params, forceRefresh = false) {
 
             return data;
         } finally {
-            // Clean up in-flight tracker when done
-            inFlightRequests.delete(key);
+            // Race-proof cleanup: only delete if this promise is still the current one
+            const current = inFlightRequests.get(key);
+            if (current?.promise === requestPromise) {
+                inFlightRequests.delete(key);
+            }
         }
     })();
 
-    inFlightRequests.set(key, requestPromise);
+    // Store with metadata for dedupe decisions
+    inFlightRequests.set(key, { promise: requestPromise, forceRefresh });
     return requestPromise;
 }
 
