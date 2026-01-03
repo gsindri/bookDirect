@@ -2537,6 +2537,9 @@ Best regards,`;
             break;
           default:
             // Fallback to old string matching for backwards compatibility
+            if (!errorCode) {
+              console.warn('bookDirect: Compare error missing error_code, using string fallback:', response);
+            }
             if (response.error.includes('google_hotels failed')) {
               userMessage = 'Price data temporarily unavailable. Try refreshing.';
             } else if (response.error.includes('Rate limit')) {

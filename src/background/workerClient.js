@@ -7,6 +7,7 @@
 
 import { WORKER_BASE_URL, TRANSIENT_ERROR_CODES } from '../shared/constants.js';
 import { normCurrency, normGl } from '../shared/normalize.js';
+import { ERR_NETWORK, ERR_RATE_LIMIT, ERR_INVALID_PARAMS, ERR_SEARCH_FAILED } from '../shared/contracts.js';
 
 /**
  * Create a Worker API client.
@@ -87,8 +88,18 @@ export function createWorkerClient({ devDebug, loadCtxId, log }) {
                 let parsed = {};
                 try { parsed = JSON.parse(text); } catch { }
 
+                // Preserve Worker error_code if present, else map from HTTP status
+                let error_code = parsed.error_code;
+                if (!error_code) {
+                    if (response.status === 429) error_code = ERR_RATE_LIMIT;
+                    else if (response.status === 400) error_code = ERR_INVALID_PARAMS;
+                    else if (response.status >= 500) error_code = ERR_NETWORK;
+                    else error_code = ERR_SEARCH_FAILED;
+                }
+
                 return {
                     error: parsed.error || `API error: ${response.status}`,
+                    error_code,
                     status: response.status,
                     details: parsed,
                     rawBody: text.slice(0, 500) // Include raw for debugging
@@ -107,6 +118,7 @@ export function createWorkerClient({ devDebug, loadCtxId, log }) {
             log('Compare fetch failed', err);
             return {
                 error: err.message || 'Network error',
+                error_code: ERR_NETWORK,
                 status: 0
             };
         }
@@ -137,7 +149,7 @@ export function createWorkerClient({ devDebug, loadCtxId, log }) {
             return data;
         } catch (err) {
             log('Prefetch error', err);
-            return { ok: false, error: err.message };
+            return { ok: false, error: err.message, error_code: ERR_NETWORK };
         }
     }
 
@@ -177,7 +189,12 @@ export function createWorkerClient({ devDebug, loadCtxId, log }) {
             } else {
                 log('Hotel details fetch failed:', err);
             }
-            return { error: err.message || 'Fetch failed' };
+
+            // Assign error_code based on HTTP status or default to NETWORK
+            let error_code = ERR_NETWORK;
+            if (/HTTP 429/.test(err.message)) error_code = ERR_RATE_LIMIT;
+
+            return { error: err.message || 'Fetch failed', error_code };
         }
     }
 

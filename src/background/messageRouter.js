@@ -14,7 +14,11 @@ import {
     MSG_GET_HOTEL_DETAILS,
     MSG_GET_COMPARE_DATA,
     MSG_REFRESH_COMPARE,
-    MSG_GET_PAGE_CONTEXT
+    MSG_GET_PAGE_CONTEXT,
+    ERR_NO_PAGE_CONTEXT,
+    ERR_NO_DATES,
+    ERR_INVALID_PARAMS,
+    ERR_NETWORK
 } from '../shared/contracts.js';
 
 import { getCompareKey } from './compareCache.js';
@@ -45,6 +49,11 @@ export function createMessageRouter({
     storeCtxId,
     fetchCompareDeduped
 }) {
+    // Helper to ensure consistent error responses with error_code
+    function sendError(sendResponseFn, error_code, error, extra = {}) {
+        sendResponseFn({ error, error_code, ...extra });
+    }
+
     return (message, sender, sendResponse) => {
         const tabId = sender.tab?.id;
 
@@ -87,12 +96,12 @@ export function createMessageRouter({
                         await storeCtxId(payload, data.ctxId, tabId, tabCtxIds, log);
                         sendResponse({ ok: true, ctxId: data.ctxId, count: data.count, cache: data.cache });
                     } else {
-                        sendResponse({ ok: false, error: data.error || 'Prefetch failed' });
+                        sendResponse({ ok: false, error: data.error || 'Prefetch failed', error_code: data.error_code || ERR_NETWORK });
                     }
                 })
                 .catch(err => {
                     log('Prefetch error', err);
-                    sendResponse({ ok: false, error: err.message });
+                    sendResponse({ ok: false, error: err.message, error_code: ERR_NETWORK });
                 });
 
             return true; // Keep channel open for async
@@ -140,14 +149,14 @@ export function createMessageRouter({
         if (message.type === MSG_GET_HOTEL_DETAILS) {
             const query = (message.query || '').trim();
             if (!query) {
-                sendResponse({ error: 'Missing query' });
+                sendError(sendResponse, ERR_INVALID_PARAMS, 'Missing query');
                 return false;
             }
 
             workerClient.fetchHotelDetails(query)
                 .then(data => sendResponse(data))
                 .catch(err => {
-                    sendResponse({ error: err.message || 'Fetch failed' });
+                    sendError(sendResponse, ERR_NETWORK, err.message || 'Fetch failed');
                 });
 
             return true; // Keep channel open for async
@@ -163,7 +172,7 @@ export function createMessageRouter({
                     log('No page context, requesting resend from tab', tabId);
                     chrome.tabs.sendMessage(tabId, { type: MSG_RESEND_PAGE_CONTEXT }).catch(() => { });
                 }
-                sendResponse({ error: 'No page context available' });
+                sendError(sendResponse, ERR_NO_PAGE_CONTEXT, 'No page context available', { needsPageContext: true });
                 return false;
             }
 
@@ -178,7 +187,7 @@ export function createMessageRouter({
 
             // Check if we have required params
             if (!params.checkIn || !params.checkOut) {
-                sendResponse({ error: 'Missing dates', needsDates: true });
+                sendError(sendResponse, ERR_NO_DATES, 'Missing dates', { needsDates: true });
                 return false;
             }
 
@@ -201,7 +210,7 @@ export function createMessageRouter({
                 }
                 sendResponse(data);
             }).catch(err => {
-                sendResponse({ error: err.message });
+                sendError(sendResponse, ERR_NETWORK, err.message || 'Network error');
             });
 
             return true; // Keep channel open for async
@@ -212,7 +221,7 @@ export function createMessageRouter({
             const context = tabId ? tabContextStore.get(tabId) : null;
 
             if (!context) {
-                sendResponse({ error: 'No page context available' });
+                sendError(sendResponse, ERR_NO_PAGE_CONTEXT, 'No page context available', { needsPageContext: true });
                 return false;
             }
 
@@ -257,7 +266,7 @@ export function createMessageRouter({
                 }
                 sendResponse(data);
             }).catch(err => {
-                sendResponse({ error: err.message });
+                sendError(sendResponse, ERR_NETWORK, err.message || 'Network error');
             });
 
             return true;
