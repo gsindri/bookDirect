@@ -52,7 +52,15 @@ export function createWorkerClient({ devDebug, loadCtxId, log }) {
             officialUrl: params.officialUrl,
             currentHost: params.currentHost,
             ctx: ctxId, // Use looked-up ctx, not params.ctx
-            bookingUrl: params.bookingUrl, // For smart slug extraction in Worker
+            // Compact bookingUrl to origin+pathname (strips query params to reduce size)
+            bookingUrl: params.bookingUrl ? (() => {
+                try {
+                    const u = new URL(params.bookingUrl);
+                    return u.origin + u.pathname;
+                } catch {
+                    return params.bookingUrl;
+                }
+            })() : undefined,
             smart: params.smart ? '1' : undefined // Smart multi-pass search mode
         };
 
