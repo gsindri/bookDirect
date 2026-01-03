@@ -2471,7 +2471,9 @@ Best regards,`;
           hotelName: _hotelName,
           bookingUrl: window.location.href,
           reason: opts.reason || null,
-          smart: forceRefresh && !opts.reason  // Smart mode on user-initiated retry only
+          smart: (typeof opts.smart === 'boolean')
+            ? opts.smart
+            : (forceRefresh && !opts.reason)  // Smart mode on user-initiated retry only
         }, (res) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
@@ -2583,7 +2585,7 @@ Best regards,`;
           }, 1000);
         }
       }
-      fetchCompareData(isExpensive);
+      fetchCompareData(true, { smart: isExpensive });
     });
   }
 
