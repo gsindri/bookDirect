@@ -1263,8 +1263,23 @@
         }
 
         // 3. Extract adults from URL (default: 2)
-        const adultsRaw = params.get('group_adults') || params.get('adults') || params.get('no_rooms');
-        const adults = parseInt(adultsRaw, 10) || 2;
+        // IMPORTANT: no_rooms is rooms, not adults - do not use it here
+        const adultsRaw =
+            params.get('group_adults') ||
+            params.get('req_adults') ||   // optional extra key (harmless if absent)
+            params.get('adults') ||
+            '';
+
+        let adults = parseInt(adultsRaw, 10);
+        if (!Number.isFinite(adults) || adults <= 0) adults = 2;
+        // Keep consistent with Worker clamp (1..10)
+        adults = Math.min(10, Math.max(1, adults));
+
+        // 3b. Extract rooms separately (useful for debugging multi-room price mismatches)
+        const roomsRaw = params.get('no_rooms') || params.get('rooms') || '';
+        let rooms = parseInt(roomsRaw, 10);
+        if (!Number.isFinite(rooms) || rooms <= 0) rooms = 1;
+        rooms = Math.min(8, Math.max(1, rooms)); // cap for sanity
 
         // 4. Extract currency from URL or price element (MUST be ISO 3-letter code)
         // Symbol to ISO mapping
@@ -1364,6 +1379,7 @@
             checkIn,
             checkOut,
             adults,
+            rooms, // For debug/future; not used in offersKey yet
             currency: currency || null, // null = let Worker decide default
             currentHost,
             currentOtaPriceTotal,
@@ -1489,37 +1505,233 @@
         const nameEl = findElement(SELECTORS.details.hotelName);
         const hotelName = cleanHotelName(nameEl ? nameEl.innerText : null) || 'Hotel';
 
+        // --- BOOKING VIEWING PRICE RESOLVER ---
+        // Multi-pass resolver returning structured price state
+        // States: selected_total | sidebar_total | from_price | unknown
+        function resolveBookingViewingPrice() {
+            // Helper: Parse price string to number (handles € 450, 450 EUR, kr. 45.000, etc.)
+            function parsePrice(text) {
+                if (!text) return null;
+                // Remove currency symbols/codes and non-numeric except . and ,
+                const cleaned = text.replace(/[^0-9.,]/g, '').trim();
+                if (!cleaned) return null;
+
+                // Handle European format (1.234,56) vs US format (1,234.56)
+                // If has both . and , : last separator is decimal
+                if (cleaned.includes('.') && cleaned.includes(',')) {
+                    const lastDot = cleaned.lastIndexOf('.');
+                    const lastComma = cleaned.lastIndexOf(',');
+                    if (lastComma > lastDot) {
+                        // European: 1.234,56 -> 1234.56
+                        return parseFloat(cleaned.replace(/\./g, '').replace(',', '.'));
+                    } else {
+                        // US: 1,234.56 -> 1234.56
+                        return parseFloat(cleaned.replace(/,/g, ''));
+                    }
+                } else if (cleaned.includes(',')) {
+                    // Could be European decimal (45,00) or US thousands (1,234)
+                    // Heuristic: if exactly 2 digits after comma, treat as decimal
+                    const parts = cleaned.split(',');
+                    if (parts.length === 2 && parts[1].length === 2) {
+                        return parseFloat(cleaned.replace(',', '.'));
+                    }
+                    return parseFloat(cleaned.replace(/,/g, ''));
+                }
+                return parseFloat(cleaned);
+            }
+
+            // Helper: Extract currency from price text
+            function extractCurrency(text) {
+                if (!text) return null;
+                const match = text.match(/^([A-Z]{3}|[€$£¥₹₩₽₪฿₫]|kr\.?)/i);
+                if (match) {
+                    const sym = match[1];
+                    const SYMBOL_MAP = { '€': 'EUR', '$': 'USD', '£': 'GBP', '¥': 'JPY', '₹': 'INR', 'kr': 'ISK', 'kr.': 'ISK' };
+                    return SYMBOL_MAP[sym] || (sym.length === 3 ? sym.toUpperCase() : null);
+                }
+                // Check end of string for currency code
+                const endMatch = text.match(/([A-Z]{3})$/i);
+                return endMatch ? endMatch[1].toUpperCase() : null;
+            }
+
+            // Helper: Find row-scoped price element
+            function getRowPrice(row) {
+                if (!row) return null;
+                const priceEl = row.querySelector('.bui-price-display__value') ||
+                    row.querySelector('[data-testid="price-and-discounted-price"]') ||
+                    row.querySelector('.prco-valign-middle-helper') ||
+                    row.querySelector('.hprt-price-price');
+                if (priceEl && isVisible(priceEl) && /\d/.test(priceEl.innerText)) {
+                    return priceEl.innerText.trim();
+                }
+                return null;
+            }
+
+            // --- Pass 0: Detect selection state ---
+            const selects = document.querySelectorAll('select[name^="hprt_nos_select"], .hprt-nos-select');
+            const selectedRooms = [];
+            let totalSelectedCount = 0;
+
+            selects.forEach(select => {
+                const count = parseInt(select.value, 10) || 0;
+                if (count > 0) {
+                    totalSelectedCount += count;
+                    const row = select.closest('tr');
+                    const nameEl = row?.querySelector('.hprt-roomtype-icon-link') ||
+                        row?.querySelector('.hprt-roomtype-link') ||
+                        row?.querySelector('[data-testid="room-name"]') ||
+                        row?.querySelector('.hprt-roomtype-name');
+                    const roomName = nameEl?.innerText?.trim() || 'Room';
+                    selectedRooms.push({ name: roomName, count, row });
+                }
+            });
+
+            const hasSelection = totalSelectedCount > 0;
+            Logger.debug('[resolveBookingViewingPrice] Pass 0:', { hasSelection, totalSelectedCount, selectedRooms: selectedRooms.length });
+
+            // --- Pass 1: selected_total (exact total for user's selection) ---
+            if (hasSelection) {
+                // Try to compute from selected room rows
+                let computedTotal = 0;
+                let allPriced = true;
+                let currency = null;
+
+                for (const sel of selectedRooms) {
+                    const rowPrice = getRowPrice(sel.row);
+                    if (rowPrice) {
+                        const num = parsePrice(rowPrice);
+                        if (Number.isFinite(num)) {
+                            computedTotal += num * sel.count;
+                            if (!currency) currency = extractCurrency(rowPrice);
+                        } else {
+                            allPriced = false;
+                            break;
+                        }
+                    } else {
+                        allPriced = false;
+                        break;
+                    }
+                }
+
+                // If we got a valid computed total from rows, use it
+                if (allPriced && computedTotal > 0) {
+                    Logger.debug('[resolveBookingViewingPrice] Pass 1 SUCCESS: selected_total from rows', { computedTotal });
+                    return {
+                        state: 'selected_total',
+                        rawText: `${currency || ''} ${computedTotal.toFixed(0)}`.trim(),
+                        totalNumber: computedTotal,
+                        currency: currency,
+                        source: 'selected_total_el',
+                        meta: { roomsSelectedCount: totalSelectedCount, roomsSelected: selectedRooms.map(r => ({ name: r.name, count: r.count })) }
+                    };
+                }
+
+                // Fallback: use sidebar total element (it should reflect selection)
+                const sidebarTotal = findElement(SELECTORS.details.totalPrice, scope);
+                if (sidebarTotal && isVisible(sidebarTotal) && /\d/.test(sidebarTotal.innerText)) {
+                    const text = sidebarTotal.innerText.trim();
+                    const num = parsePrice(text);
+                    if (Number.isFinite(num)) {
+                        Logger.debug('[resolveBookingViewingPrice] Pass 1 SUCCESS: selected_total from sidebar', { num, text });
+                        return {
+                            state: 'selected_total',
+                            rawText: text,
+                            totalNumber: num,
+                            currency: extractCurrency(text),
+                            source: 'sidebar_total_el',
+                            meta: { roomsSelectedCount: totalSelectedCount, roomsSelected: selectedRooms.map(r => ({ name: r.name, count: r.count })) }
+                        };
+                    }
+                }
+            }
+
+            // --- Pass 2: sidebar_total (sticky summary price before selection) ---
+            // Sometimes Booking shows a total even without selection
+            if (!hasSelection) {
+                const sidebarTotal = findElement(SELECTORS.details.totalPrice, scope);
+                if (sidebarTotal && isVisible(sidebarTotal) && /\d/.test(sidebarTotal.innerText)) {
+                    const text = sidebarTotal.innerText.trim();
+                    const num = parsePrice(text);
+                    if (Number.isFinite(num)) {
+                        Logger.debug('[resolveBookingViewingPrice] Pass 2 SUCCESS: sidebar_total', { num, text });
+                        return {
+                            state: 'sidebar_total',
+                            rawText: text,
+                            totalNumber: num,
+                            currency: extractCurrency(text),
+                            source: 'sidebar_total_el',
+                            meta: { roomsSelectedCount: 0 }
+                        };
+                    }
+                }
+            }
+
+            // --- Pass 3: from_price (minimum across room table) ---
+            // This is the KEY FIX: compute true minimum, not first match
+            const roomTable = document.querySelector('.hprt-table') ||
+                document.querySelector('#hprt-table') ||
+                document.querySelector('[data-block-id]') ||
+                document.querySelector('.roomstable');
+
+            if (roomTable) {
+                const rows = roomTable.querySelectorAll('tr[data-block-id], tr.hprt-table-row, tr');
+                let minPrice = Infinity;
+                let minText = null;
+                let minCurrency = null;
+
+                rows.forEach(row => {
+                    const priceText = getRowPrice(row);
+                    if (priceText) {
+                        const num = parsePrice(priceText);
+                        if (Number.isFinite(num) && num > 0 && num < minPrice) {
+                            minPrice = num;
+                            minText = priceText;
+                            minCurrency = extractCurrency(priceText);
+                        }
+                    }
+                });
+
+                if (Number.isFinite(minPrice) && minPrice < Infinity) {
+                    Logger.debug('[resolveBookingViewingPrice] Pass 3 SUCCESS: from_price (table min)', { minPrice, minText });
+                    return {
+                        state: 'from_price',
+                        rawText: minText,
+                        totalNumber: minPrice,
+                        currency: minCurrency,
+                        source: 'room_table_min',
+                        meta: { roomsSelectedCount: 0 }
+                    };
+                }
+            }
+
+            // --- Pass 4: unknown ---
+            Logger.debug('[resolveBookingViewingPrice] Pass 4: unknown (no reliable price found)');
+            return {
+                state: 'unknown',
+                rawText: 'Select room',
+                totalNumber: null,
+                currency: null,
+                source: 'none',
+                meta: { roomsSelectedCount: 0 }
+            };
+        }
+
+        // Legacy wrapper for backward compatibility
         function getBestPrice() {
-            // Search inside the expanded SCOPE
-            let totalEl = findElement(SELECTORS.details.totalPrice, scope);
-
-            // Validation: Must be visible and have numbers
-            if (totalEl && isVisible(totalEl) && /\d/.test(totalEl.innerText)) {
-                // SUCCESS
-                // totalEl.style.border = '3px solid #00FF00'; // REMOVED FOR PRODUCTION
-
-                // Clear fallback
-                const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
-                if (fallbackEl) fallbackEl.style.outline = '';
-
-                return totalEl.innerText.trim();
-            }
-
-            // FALLBACK
-            const fallbackEl = findElement(SELECTORS.details.fallbackPrice);
-            if (fallbackEl) {
-                // fallbackEl.style.outline = '3px solid #FF0000'; // REMOVED FOR PRODUCTION
-                if (totalEl) totalEl.style.border = '';
-                return fallbackEl.innerText.trim();
-            }
-
-            return 'Select Room';
+            const resolved = resolveBookingViewingPrice();
+            return resolved.rawText;
         }
 
         const initialPrice = getBestPrice();
 
         if (!app && window.BookDirect) {
             app = window.BookDirect.createUI(hotelName, initialPrice, true);
+
+            // Set initial structured price state for correct labels
+            const initialResolved = resolveBookingViewingPrice();
+            if (app.updateViewingPrice) {
+                app.updateViewingPrice(initialResolved);
+            }
 
             // Store the button we found as initial anchor
             reserveButton = button;
@@ -1663,11 +1875,19 @@
             function doUpdate() {
                 rafPending = false;
 
-                const currentPrice = getBestPrice();
+                // Use structured price resolver for state-aware UI
+                const resolved = resolveBookingViewingPrice();
+                const currentPriceJson = JSON.stringify(resolved);
+
                 // Only update if price actually changed (avoid triggering rerender)
-                if (currentPrice !== lastPriceValue) {
-                    lastPriceValue = currentPrice;
-                    app.updatePrice(currentPrice);
+                if (currentPriceJson !== lastPriceValue) {
+                    lastPriceValue = currentPriceJson;
+                    // Use new structured method if available, fallback to legacy
+                    if (app.updateViewingPrice) {
+                        app.updateViewingPrice(resolved);
+                    } else {
+                        app.updatePrice(resolved.rawText);
+                    }
                 }
 
                 // Update room details
@@ -1704,9 +1924,12 @@
                 attributeFilter: ['class', 'value', 'selected', 'data-value', 'aria-valuenow']
             });
 
-            // Initial Call
-            const initialPrice = getBestPrice();
-            lastPriceValue = initialPrice;
+            // Initial Call - use structured resolver
+            const initialResolved = resolveBookingViewingPrice();
+            lastPriceValue = JSON.stringify(initialResolved);
+            if (app.updateViewingPrice) {
+                app.updateViewingPrice(initialResolved);
+            }
             const initialDetails = getRoomDetails();
             if (app.updateDetails) app.updateDetails(initialDetails);
             if (app.updateSelectedRooms) {

@@ -43,6 +43,8 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   // Internal state
   let _hotelName = hotelName;
   let _price = price;
+  let _priceState = 'unknown'; // selected_total | sidebar_total | from_price | unknown
+  let _priceNumber = null; // Parsed numeric value of viewing price
   let _roomDetails = '';
   let _foundEmail = ''; // Discovered email from hotel website
   let _bookDirectUrl = null; // Best URL for Book Direct button
@@ -769,6 +771,26 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         padding: 6px 10px;
         background: rgba(234, 179, 8, 0.08);
         border-radius: 6px;
+      }
+
+      .selection-prompt {
+        font-size: 11px;
+        color: #64748b;
+        margin-top: 4px;
+        font-style: italic;
+      }
+
+      .potential-savings {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 10px;
+        padding: 10px 12px;
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.04));
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: #2563eb;
       }
 
       .compare-toggle {
@@ -2400,6 +2422,8 @@ Best regards,`;
     // --- DEBUG: Savings calculation inputs ---
     Logger.debug('Savings calc inputs:', {
       _price,
+      _priceState,
+      _priceNumber,
       viewingTotal,
       googleBookingTotal,
       baselineTotal,
@@ -2412,30 +2436,72 @@ Best regards,`;
     });
 
     // Calculate savings using room-matched price when available, otherwise overall cheapest
-    // Only show savings when we're confident in the match (allowStrongClaims)
     const savingsCompareTotal = displayTotal ?? cheapestOverall?.total;
+
+    // Determine claim type based on _priceState
+    const isExactClaim = _priceState === 'selected_total' || _priceState === 'sidebar_total';
+    const isPotentialClaim = _priceState === 'from_price';
+
+    // Sanity check for potential claims: compare viewingTotal vs googleBookingTotal
+    // If ratio is wildly off (< 0.40 or > 2.50), don't show potential savings
+    let sanityCheckPassed = true;
+    if (isPotentialClaim && Number.isFinite(viewingTotal) && Number.isFinite(googleBookingTotal) && googleBookingTotal > 0) {
+      const ratio = viewingTotal / googleBookingTotal;
+      if (ratio < 0.40 || ratio > 2.50) {
+        Logger.debug('Sanity check FAILED: viewing/google ratio out of bounds', { viewingTotal, googleBookingTotal, ratio });
+        sanityCheckPassed = false;
+      }
+    }
+
     if (allowPriceRows && savingsCompareTotal && baselineTotal && savingsCompareTotal < baselineTotal && allowStrongClaims) {
       const savings = baselineTotal - savingsCompareTotal;
       console.log('bookDirect: Savings calculation:', {
         savings,
         currency,
         comparedTo: isRoomMatched ? 'room-matched' : 'cheapest-overall',
-        isMeaningful: isMeaningfulSavings(savings, baselineTotal, currency)
+        isMeaningful: isMeaningfulSavings(savings, baselineTotal, currency),
+        claimType: isExactClaim ? 'exact' : (isPotentialClaim ? 'potential' : 'none')
       });
 
       // Only show savings callout if meaningful (>=1.5% or above currency minimum)
-      // Note: Gate warning is already shown earlier (unconditionally) so just show savings if not gated
       if (isMeaningfulSavings(savings, baselineTotal, currency) && !displayHasGate) {
-        html += `
-          <div class="compare-savings">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
-              <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-            </svg>
-            Save ${formatComparePrice(savings, currency)} vs your selection
-          </div>
-        `;
+        if (isExactClaim) {
+          // Exact claim: "Save X vs your selection"
+          html += `
+            <div class="compare-savings">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+              </svg>
+              Save ${formatComparePrice(savings, currency)} vs your selection
+            </div>
+          `;
+        } else if (isPotentialClaim && sanityCheckPassed) {
+          // Potential claim: "Potential savings up to X"
+          html += `
+            <div class="potential-savings">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 16px; height: 16px;">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clip-rule="evenodd" />
+              </svg>
+              Potential savings up to ${formatComparePrice(savings, currency)}
+            </div>
+          `;
+        } else if (isPotentialClaim && !sanityCheckPassed) {
+          // Sanity check failed - prompt to select rooms
+          html += `
+            <div class="compare-room-note">
+              💡 Prices depend on room type — select rooms to confirm savings
+            </div>
+          `;
+        }
       }
       // If savings are trivial, just show nothing (cleaner than a preachy message)
+    } else if (_priceState === 'unknown' || (_priceState === 'from_price' && !baselineTotal)) {
+      // Unknown state or no baseline - show prompt
+      html += `
+        <div class="compare-room-note">
+          💡 Select rooms to see exact savings
+        </div>
+      `;
     }
 
     // Show "no prices" if no rows were rendered (warning alone doesn't count)
@@ -2686,6 +2752,50 @@ Best regards,`;
     _selectedRooms = Array.isArray(rooms) ? rooms : [];
     // Schedule debounced re-render with new room context
     scheduleCompareRerender();
+  };
+
+  // Update viewing price with structured state (new API)
+  container.updateViewingPrice = function (priceObj) {
+    if (!priceObj || typeof priceObj !== 'object') return;
+
+    // Track state for label/savings computation
+    _priceState = priceObj.state || 'unknown';
+    _priceNumber = Number.isFinite(priceObj.totalNumber) ? priceObj.totalNumber : null;
+
+    Logger.debug('updateViewingPrice:', { state: _priceState, totalNumber: _priceNumber, rawText: priceObj.rawText });
+
+    // Update hero label based on state
+    const heroLabel = shadowRoot.querySelector('.label');
+    if (heroLabel) {
+      const labelMap = {
+        'selected_total': 'Booking.com (your selection)',
+        'sidebar_total': 'Booking.com (total shown)',
+        'from_price': 'Booking.com (starting at)',
+        'unknown': 'Booking.com'
+      };
+      heroLabel.textContent = labelMap[_priceState] || 'Booking.com';
+    }
+
+    // Show/hide selection prompt for from_price state
+    let prompt = shadowRoot.getElementById('selection-prompt');
+    if (_priceState === 'from_price' || _priceState === 'unknown') {
+      if (!prompt) {
+        prompt = document.createElement('div');
+        prompt.id = 'selection-prompt';
+        prompt.className = 'selection-prompt';
+        prompt.textContent = 'Select a room to confirm exact total & savings';
+        const priceDisplay = shadowRoot.getElementById('price-display');
+        if (priceDisplay && priceDisplay.parentNode) {
+          priceDisplay.parentNode.insertBefore(prompt, priceDisplay.nextSibling);
+        }
+      }
+      prompt.style.display = 'block';
+    } else if (prompt) {
+      prompt.style.display = 'none';
+    }
+
+    // Delegate to legacy updatePrice for display rendering
+    container.updatePrice(priceObj.rawText);
   };
 
   return container;
