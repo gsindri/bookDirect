@@ -1759,6 +1759,8 @@ Best regards,`;
   let _lastCompareClickAt = 0;      // Click debounce
   let _compareRerenderTimer = null; // Debounced rerender for room/price changes
   let _compareInFlight = false;     // Guard against rerender during fetch
+  let _sanityState = null;          // { severity, reasons, message, stats } or null
+  let _autoVerifyDone = false;      // Guard for auto-verify (future use)
 
   // Debounced rerender for room/price changes (avoids rapid fire during room selection)
   function scheduleCompareRerender() {
@@ -1836,6 +1838,141 @@ Best regards,`;
   // Handles: "$1,234.56" -> 1234.56, "€ 1.234,56" -> 1234.56, "ISK 25,103" -> 25103
   // Use shared money parsing from BookDirect.Money (loaded from money.global.js)
   const parseMoneyToNumber = BookDirect.Money.parseMoneyToNumber;
+
+  // Infer currency code from price string (e.g., "$1,234" → "USD", "€500" → "EUR")
+  function inferCurrencyFromPrice(priceStr) {
+    if (!priceStr) return null;
+    const s = String(priceStr).trim();
+    // Symbol map (common currencies)
+    const SYMBOL_MAP = {
+      '$': 'USD', '€': 'EUR', '£': 'GBP', '¥': 'JPY', '₹': 'INR',
+      'kr': 'ISK', '₩': 'KRW', '฿': 'THB', 'R$': 'BRL', 'zł': 'PLN'
+    };
+    for (const [sym, code] of Object.entries(SYMBOL_MAP)) {
+      if (s.startsWith(sym) || s.includes(sym)) return code;
+    }
+    // Try code prefix (e.g., "USD 1,234" or "ISK 25,000")
+    const codeMatch = s.match(/^([A-Z]{3})\s/i);
+    if (codeMatch) return codeMatch[1].toUpperCase();
+    return null;
+  }
+
+  // ========================================
+  // PRICE SANITY LAYER
+  // Detects "too good to be true" price differences
+  // ========================================
+  function computePriceSanity({
+    viewingTotal,       // parsed number from _price
+    viewingCurrency,    // inferred from _price (may be null)
+    apiCurrency,        // data.query.currency
+    nights,             // data.nights
+    displayTotal,       // best comparison total
+    displayHasGate,     // Member/Login/Mobile
+    isRoomMatched,      // selectionCheapest exists
+    totalSelectedRooms, // from mergedSelections
+    bookingOfferTotal,  // data.bookingOffer?.total
+  }) {
+    const reasons = [];
+    const stats = {};
+
+    // --- 2A) Currency mismatch (highest priority) ---
+    if (viewingCurrency && apiCurrency &&
+      viewingCurrency.toUpperCase() !== apiCurrency.toUpperCase()) {
+      return {
+        severity: 'block',
+        reasons: ['currency_mismatch'],
+        stats: { viewingCurrency, apiCurrency },
+        message: 'Prices appear to be in different currencies — refresh after switching currency.'
+      };
+    }
+
+    // --- 2B) Per-night vs total baseline mistake ---
+    if (nights >= 2 && Number.isFinite(viewingTotal) && Number.isFinite(bookingOfferTotal) && bookingOfferTotal > 0) {
+      const multiplied = viewingTotal * nights;
+      const ratio = multiplied / bookingOfferTotal;
+      // If viewing * nights ≈ bookingOffer, the viewing price is likely per-night
+      if (ratio >= 0.85 && ratio <= 1.15) {
+        return {
+          severity: 'block',
+          reasons: ['baseline_per_night_suspect'],
+          stats: { viewingTotal, multiplied, bookingOfferTotal, ratio, nights },
+          message: 'Booking price looks like per-night, not total — select rooms to compare totals.'
+        };
+      }
+    }
+
+    // --- 2C) Room-selection mismatch ---
+    if (totalSelectedRooms > 0 && !isRoomMatched) {
+      reasons.push('room_selection_unmatched');
+    }
+
+    // --- 2D) Gated deals - treat as warn, don't suppress prices ---
+    if (displayHasGate) {
+      return {
+        severity: 'warn',
+        reasons: ['gated_rate'],
+        stats: {},
+        message: 'Cheapest price may require membership/login/mobile.'
+      };
+    }
+
+    // --- 2E) Huge savings anomaly ---
+    if (Number.isFinite(viewingTotal) && Number.isFinite(displayTotal) &&
+      viewingTotal > 0 && displayTotal > 0 && displayTotal < viewingTotal) {
+      const savingsAbs = viewingTotal - displayTotal;
+      const savingsPct = savingsAbs / viewingTotal;
+      const ccy = (apiCurrency || 'USD').toUpperCase();
+
+      stats.savingsAbs = savingsAbs;
+      stats.savingsPct = savingsPct;
+      stats.ratio = viewingTotal / displayTotal;
+
+      // Absolute thresholds scaled by currency and nights
+      const ABS_WARN = { USD: 80, EUR: 80, GBP: 80, ISK: 8000, JPY: 9000, KRW: 90000 };
+      const ABS_BLOCK = { USD: 150, EUR: 150, GBP: 150, ISK: 15000, JPY: 17000, KRW: 170000 };
+
+      function scaledAbs(map, n) {
+        const base = map[ccy] ?? 80;
+        const clampedNights = Math.max(1, Math.min(14, n || 1));
+        return base * Math.max(1, clampedNights / 2);
+      }
+
+      const absWarn = scaledAbs(ABS_WARN, nights);
+      const absBlock = scaledAbs(ABS_BLOCK, nights);
+
+      // Block: ≥65% savings AND above block threshold
+      if (savingsPct >= 0.65 && savingsAbs >= absBlock) {
+        return {
+          severity: 'block',
+          reasons: [...reasons, 'huge_savings_anomaly'],
+          stats,
+          message: 'Huge difference detected — likely not like-for-like. Retry matching.'
+        };
+      }
+
+      // Warn: ≥45% savings AND above warn threshold
+      if (savingsPct >= 0.45 && savingsAbs >= absWarn) {
+        return {
+          severity: 'warn',
+          reasons: [...reasons, 'large_savings_anomaly'],
+          stats,
+          message: 'Unusually large difference — check room type, cancellation, and taxes.'
+        };
+      }
+    }
+
+    // Room selection unmatched as standalone warn
+    if (reasons.includes('room_selection_unmatched')) {
+      return {
+        severity: 'warn',
+        reasons,
+        stats: { totalSelectedRooms },
+        message: "We couldn't match your selected room(s) across sites — prices may be for different rooms."
+      };
+    }
+
+    return null; // No sanity issues
+  }
 
   // --- ROOM MATCHING HELPERS (for like-for-like comparison) ---
 
@@ -2114,7 +2251,8 @@ Best regards,`;
   // --- FOOTER UPDATE FUNCTION ---
   function updateCompareFooter() {
     const data = _lastCompareData;
-    const showRetry = _currentMismatch || data?.error || data?.matchUncertain;
+    // Include sanity state in retry logic (block/warn both trigger retry)
+    const showRetry = _currentMismatch || data?.error || data?.matchUncertain || _sanityState;
     const now = Date.now();
     const cooldownRemaining = Math.max(0, Math.ceil((_retryMatchCooldownUntil - now) / 1000));
 
@@ -2128,7 +2266,8 @@ Best regards,`;
         compareRefresh.style.pointerEvents = '';
         compareRefresh.style.opacity = '';
       }
-      compareRefresh.dataset.expensive = 'true';
+      // Block-level sanity issues use smart retry
+      compareRefresh.dataset.expensive = (_sanityState?.severity === 'block') ? 'true' : 'true';
     } else {
       compareRefresh.textContent = 'Refresh';
       compareRefresh.style.pointerEvents = '';
@@ -2276,6 +2415,44 @@ Best regards,`;
     const displayBadges = isRoomMatched ? (selectionCheapest.badges || displayOffer?.badges || []) : (displayOffer?.badges || []);
     const displayHasGate = displayBadges.some(b => ['Member', 'Login', 'Mobile'].includes(b));
 
+    // --- PRICE SANITY CHECK ---
+    const viewingCurrency = inferCurrencyFromPrice(_price);
+    _sanityState = computePriceSanity({
+      viewingTotal,
+      viewingCurrency,
+      apiCurrency: currency,
+      nights: data.nights || 1,
+      displayTotal,
+      displayHasGate,
+      isRoomMatched,
+      totalSelectedRooms,
+      bookingOfferTotal: bookingOffer?.total ?? null,
+    });
+
+    const _sanityIsBlocking = (_sanityState?.severity === 'block');
+
+    // Update allowStrongClaims to include sanity check
+    // Suppress "Save X", green highlight, "Cheaper" when sanity is triggered
+    const allowStrongClaimsWithSanity = allowStrongClaims && !_sanityState;
+
+    Logger.debug('Sanity check result:', {
+      _sanityState,
+      _sanityIsBlocking,
+      viewingCurrency,
+      apiCurrency: currency,
+      allowStrongClaimsWithSanity
+    });
+
+    // --- SANITY BANNER (distinct from name mismatch warning) ---
+    if (_sanityState && !hardMismatch) {
+      const iconMap = { block: '🚫', warn: '⚠️' };
+      html += `
+        <div class="compare-mismatch-warning">
+          ${iconMap[_sanityState.severity] || '⚠️'} ${escHtml(_sanityState.message)}
+        </div>
+      `;
+    }
+
     // Cheapest display (room-matched when available, otherwise overall)
     // Only render price rows if not a hard mismatch
     if (allowPriceRows && (displayOffer || displayTotal)) {
@@ -2306,11 +2483,11 @@ Best regards,`;
           : '<span class="compare-badge matched">Same Room</span>');
       }
 
-      // Cheap/best badges: suppress when uncertain (show "Unconfirmed" instead)
-      if (_currentMismatch) {
-        // Don't claim savings when uncertain
+      // Cheap/best badges: suppress when uncertain OR sanity triggered (show "Unconfirmed" instead)
+      if (_currentMismatch || _sanityState) {
+        // Don't claim savings when uncertain or sanity triggered
         badges.push('<span class="compare-badge other-room">Unconfirmed</span>');
-      } else if (isActuallyCheaper) {
+      } else if (isActuallyCheaper && allowStrongClaimsWithSanity) {
         // This offer IS cheaper than Booking.com
         badges.push('<span class="compare-badge cheapest">Cheaper</span>');
       } else if (bookingIsBest) {
@@ -2324,8 +2501,8 @@ Best regards,`;
         badges.push(`<span class="compare-badge ${safeClassToken(b)}">${escHtml(b)}</span>`);
       }
 
-      // Only highlight as cheapest (green) if it actually IS cheaper AND we're confident
-      const sourceClass = (!_currentMismatch && isActuallyCheaper) ? 'compare-source is-cheapest' : 'compare-source';
+      // Only highlight as cheapest (green) if it actually IS cheaper AND we're confident AND sanity OK
+      const sourceClass = (!_currentMismatch && !_sanityState && isActuallyCheaper) ? 'compare-source is-cheapest' : 'compare-source';
 
       html += `
         <div class="compare-row">
@@ -2355,7 +2532,8 @@ Best regards,`;
 
       // --- MEMBER/LOGIN GATE NOTE (always visible when relevant) ---
       // Show note outside savings block so it appears even if savings aren't shown
-      if (!_currentMismatch && displayHasGate) {
+      // Skip if sanity already flagged it (to avoid duplicate messaging)
+      if (!_currentMismatch && !_sanityState && displayHasGate) {
         html += `
           <div class="compare-member-note">
             💡 Cheapest price may require membership/login
@@ -2453,7 +2631,7 @@ Best regards,`;
       }
     }
 
-    if (allowPriceRows && savingsCompareTotal && baselineTotal && savingsCompareTotal < baselineTotal && allowStrongClaims) {
+    if (allowPriceRows && savingsCompareTotal && baselineTotal && savingsCompareTotal < baselineTotal && allowStrongClaimsWithSanity) {
       const savings = baselineTotal - savingsCompareTotal;
       console.log('bookDirect: Savings calculation:', {
         savings,
@@ -2624,6 +2802,17 @@ Best regards,`;
       }
 
       renderCompareResults(response);
+
+      // --- AUTO-VERIFY ON BLOCK-LEVEL SANITY ANOMALY ---
+      // If the first compare returns a block-level anomaly, do one automatic
+      // smart retry to self-heal (wrong property, stale cache, etc.)
+      if (_sanityState?.severity === 'block' && !_autoVerifyDone && !_compareInFlight) {
+        _autoVerifyDone = true;
+        console.log('bookDirect: Auto-verify triggered for block-level sanity anomaly:', _sanityState.reasons);
+        setTimeout(() => {
+          fetchCompareData(true, { smart: true, reason: 'auto_verify_price_anomaly' });
+        }, 700);
+      }
 
     } catch (err) {
       console.error('bookDirect: Compare fetch error', err);
