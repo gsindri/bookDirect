@@ -1567,7 +1567,67 @@
                 return null;
             }
 
+            // --- Helper: Detect tax inclusion state (F6: Tax Integrity) ---
+            // Scans for tax/charge indicators near price elements
+            // Returns: 'included' | 'excluded' | 'unknown'
+            function detectTaxState() {
+                // Areas to scan for tax indicators
+                const scanAreas = [
+                    scope, // Sidebar/reservation area
+                    document.querySelector('.hprt-table'), // Room table
+                    document.querySelector('.bui-price-display'), // Price display
+                    document.querySelector('[data-testid="price-for-x-nights"]'),
+                ];
+
+                // Patterns for tax inclusion (case-insensitive)
+                // Language-robust: covers English + common Booking variations
+                const includesPatterns = [
+                    /includes?\s*taxes/i,
+                    /includes?\s*taxes?\s*and\s*(?:charges|fees)/i,
+                    /taxes?\s*included/i,
+                    /incl\.?\s*taxes/i,
+                    /all\s*taxes?\s*included/i,
+                    /price\s*includes/i,
+                ];
+
+                const excludesPatterns = [
+                    /\+\s*taxes/i,
+                    /plus\s*taxes/i,
+                    /excluding\s*taxes/i,
+                    /taxes?\s*(?:and\s*(?:fees|charges)\s*)?(?:not\s*included|excluded)/i,
+                    /taxes?\s*may\s*apply/i,
+                    /additional\s*taxes/i,
+                    /before\s*taxes/i,
+                ];
+
+                for (const area of scanAreas) {
+                    if (!area) continue;
+                    const text = area.innerText || '';
+                    const normalizedText = text.toLowerCase().replace(/\s+/g, ' ');
+
+                    // Check includes first (more specific signal)
+                    for (const pattern of includesPatterns) {
+                        if (pattern.test(normalizedText)) {
+                            Logger.debug('[detectTaxState] Found INCLUDED pattern:', pattern.source);
+                            return 'included';
+                        }
+                    }
+
+                    // Then check excludes
+                    for (const pattern of excludesPatterns) {
+                        if (pattern.test(normalizedText)) {
+                            Logger.debug('[detectTaxState] Found EXCLUDED pattern:', pattern.source);
+                            return 'excluded';
+                        }
+                    }
+                }
+
+                Logger.debug('[detectTaxState] No tax indicators found');
+                return 'unknown';
+            }
+
             // --- Pass 0: Detect selection state ---
+
             const selects = document.querySelectorAll('select[name^="hprt_nos_select"], .hprt-nos-select');
             const selectedRooms = [];
             let totalSelectedCount = 0;
@@ -1622,6 +1682,7 @@
                         totalNumber: computedTotal,
                         currency: currency,
                         source: 'selected_total_el',
+                        taxState: detectTaxState(),
                         meta: { roomsSelectedCount: totalSelectedCount, roomsSelected: selectedRooms.map(r => ({ name: r.name, count: r.count })) }
                     };
                 }
@@ -1639,6 +1700,7 @@
                             totalNumber: num,
                             currency: extractCurrency(text),
                             source: 'sidebar_total_el',
+                            taxState: detectTaxState(),
                             meta: { roomsSelectedCount: totalSelectedCount, roomsSelected: selectedRooms.map(r => ({ name: r.name, count: r.count })) }
                         };
                     }
@@ -1660,6 +1722,7 @@
                             totalNumber: num,
                             currency: extractCurrency(text),
                             source: 'sidebar_total_el',
+                            taxState: detectTaxState(),
                             meta: { roomsSelectedCount: 0 }
                         };
                     }
@@ -1699,6 +1762,7 @@
                         totalNumber: minPrice,
                         currency: minCurrency,
                         source: 'room_table_min',
+                        taxState: detectTaxState(),
                         meta: { roomsSelectedCount: 0 }
                     };
                 }
@@ -1712,6 +1776,7 @@
                 totalNumber: null,
                 currency: null,
                 source: 'none',
+                taxState: 'unknown',
                 meta: { roomsSelectedCount: 0 }
             };
         }

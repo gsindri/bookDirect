@@ -45,6 +45,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   let _price = price;
   let _priceState = 'unknown'; // selected_total | sidebar_total | from_price | unknown
   let _priceNumber = null; // Parsed numeric value of viewing price
+  let _priceTaxState = 'unknown'; // F6: Tax state (included | excluded | unknown)
   let _roomDetails = '';
   let _foundEmail = ''; // Discovered email from hotel website
   let _bookDirectUrl = null; // Best URL for Book Direct button
@@ -629,6 +630,140 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         margin-bottom: 10px;
         font-size: 12px;
         color: #856404;
+      }
+
+      /* I9: Why this match link */
+      .why-match-link {
+        display: inline-block;
+        margin-top: 6px;
+        font-size: 11px;
+        color: #0066cc;
+        text-decoration: underline;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      .why-match-link:hover {
+        color: #003580;
+      }
+
+      /* I9: Why this match modal */
+      .why-match-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 99999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .why-match-modal {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        max-width: 400px;
+        width: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        padding: 20px;
+        font-size: 13px;
+        color: #1e293b;
+      }
+      .why-match-modal h3 {
+        margin: 0 0 12px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #0f172a;
+      }
+      .why-match-modal .meta-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      .why-match-modal .meta-label {
+        color: #64748b;
+        font-size: 11px;
+      }
+      .why-match-modal .meta-value {
+        font-weight: 500;
+        text-align: right;
+      }
+      .why-match-modal .confidence-high { color: #0a8a1f; }
+      .why-match-modal .confidence-likely { color: #d97706; }
+      .why-match-modal .confidence-uncertain { color: #dc2626; }
+      .why-match-modal .candidate-list {
+        margin: 12px 0;
+        padding: 0;
+        list-style: none;
+      }
+      .why-match-modal .candidate-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid #f1f5f9;
+        font-size: 12px;
+      }
+      .why-match-modal .candidate-rank {
+        font-weight: 700;
+        color: #94a3b8;
+        min-width: 20px;
+      }
+      .why-match-modal .candidate-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .why-match-modal .candidate-conf {
+        font-size: 11px;
+        color: #64748b;
+      }
+      .why-match-modal .domain-badge {
+        background: #dcfce7;
+        color: #166534;
+        font-size: 9px;
+        padding: 2px 5px;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+      .why-match-modal .skipped-summary {
+        font-size: 11px;
+        color: #94a3b8;
+        margin: 8px 0;
+      }
+      .why-match-modal .modal-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .why-match-modal .btn-retry {
+        flex: 1;
+        padding: 8px 12px;
+        background: #003580;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .why-match-modal .btn-retry:hover {
+        background: #00264d;
+      }
+      .why-match-modal .btn-close {
+        padding: 8px 12px;
+        background: #f1f5f9;
+        color: #475569;
+        border: none;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .why-match-modal .btn-close:hover {
+        background: #e2e8f0;
       }
 
       /* 2-LINE GRID LAYOUT for compare rows */
@@ -1760,6 +1895,7 @@ Best regards,`;
   let _compareRerenderTimer = null; // Debounced rerender for room/price changes
   let _compareInFlight = false;     // Guard against rerender during fetch
   let _sanityState = null;          // { severity, reasons, message, stats } or null
+  let _integrityAssessment = null;  // Output from assessComparisonIntegrity()
   let _autoVerifyDone = false;      // Guard for auto-verify (future use)
 
   // Debounced rerender for room/price changes (avoids rapid fire during room selection)
@@ -2095,6 +2231,310 @@ Best regards,`;
     return best;
   }
 
+  // ========================================
+  // COMPARISON INTEGRITY ENGINE
+  // Centralizes all integrity decisions for comparison display
+  // ========================================
+  /**
+   * Assess comparison integrity and compute UI policy.
+   * This is the heart of the Integrity Layer - it prevents misleading claims.
+   * 
+   * @param {Object} params - Input parameters
+   * @param {Object} params.compareData - Worker response
+   * @param {Object} params.bookingMeta - {total, currency, priceState, taxState}
+   * @param {Array} params.mergedSelections - Merged room selections
+   * @param {Object|null} params.selectionCheapest - Room-matched cheapest
+   * @returns {Object} Integrity assessment with uiPolicy
+   */
+  function assessComparisonIntegrity({
+    compareData,
+    bookingMeta,
+    mergedSelections = [],
+    selectionCheapest = null,
+  }) {
+    const reasons = [];
+    const data = compareData || {};
+    const match = data.match || {};
+    const offers = Array.isArray(data.offers) ? data.offers : [];
+
+    // --- B2: Server-first mismatch detection ---
+    const matchDetails = match.matchDetails || {};
+    const confidence = match.confidence ?? 1;
+    const serverHardMismatch = !!matchDetails.hardMismatch;
+    const serverUncertain = !!(match.matchUncertain || data.matchUncertain);
+    const lowConfidence = confidence < 0.40;
+
+    // Determine mismatch level
+    let integrityLevel = 'confirmed';
+    if (serverHardMismatch) {
+      integrityLevel = 'mismatch';
+      reasons.push('match_hard_mismatch');
+    } else if (serverUncertain || lowConfidence) {
+      integrityLevel = (lowConfidence && confidence < 0.30) ? 'uncertain' : 'likely';
+      if (serverUncertain) reasons.push('match_uncertain_flag');
+      if (lowConfidence) reasons.push('match_low_confidence');
+    }
+
+    // --- D4: Room parity ---
+    const totalSelectedRooms = mergedSelections.reduce((s, r) => s + (r.count || 0), 0);
+    let roomParityState = 'none_selected';
+    if (totalSelectedRooms > 0) {
+      if (selectionCheapest) {
+        roomParityState = 'matched';
+      } else {
+        // Check for partial match: any selected room matchable anywhere?
+        let matchedRoomTypes = 0;
+        const ROOM_MATCH_THRESHOLD = 0.30;
+        for (const sel of mergedSelections) {
+          for (const offer of offers) {
+            if (!Array.isArray(offer.rooms)) continue;
+            const match = bestRoomMatch(sel.name, offer.rooms);
+            if (match && match.score >= ROOM_MATCH_THRESHOLD) {
+              matchedRoomTypes++;
+              break;
+            }
+          }
+        }
+        if (matchedRoomTypes === 0) {
+          roomParityState = 'failed';
+          reasons.push('room_failed_match');
+        } else if (matchedRoomTypes < mergedSelections.length) {
+          roomParityState = 'partial';
+          reasons.push('room_partial_match');
+        } else {
+          roomParityState = 'failed'; // All matched individually but no offer has all
+          reasons.push('room_failed_match');
+        }
+      }
+    } else {
+      reasons.push('room_none_selected');
+    }
+
+    // --- E5: Gating (cheapestAny vs cheapestPublic) ---
+    function offerHasGate(offer) {
+      const badges = offer?.badges || [];
+      return badges.some(b => ['Member', 'Login', 'Mobile'].includes(b));
+    }
+
+    const cheapestAny = selectionCheapest
+      ? { ...selectionCheapest.offer, total: selectionCheapest.total, isRoomMatched: true }
+      : data.cheapestOverall || null;
+
+    // Find cheapest non-gated offer
+    let cheapestPublic = null;
+    const sortedOffers = offers.slice().sort((a, b) => (a.total || Infinity) - (b.total || Infinity));
+    for (const o of sortedOffers) {
+      if (!offerHasGate(o) && o.total > 0) {
+        cheapestPublic = o;
+        break;
+      }
+    }
+
+    const cheapestIsGated = cheapestAny && offerHasGate(cheapestAny);
+    const allOffersGated = sortedOffers.length > 0 && sortedOffers.every(offerHasGate);
+    if (cheapestIsGated) reasons.push('cheapest_gated');
+    if (allOffersGated) reasons.push('all_offers_gated');
+
+    // --- G7: Currency alignment ---
+    const bookingCurrency = bookingMeta?.currency || null;
+    const apiCurrency = data.query?.currency || null;
+    const currencyState = (!bookingCurrency || !apiCurrency ||
+      bookingCurrency.toUpperCase() === apiCurrency.toUpperCase()) ? 'aligned' : 'mismatch';
+    if (currencyState === 'mismatch') {
+      reasons.push('currency_mismatch');
+      if (integrityLevel === 'confirmed') integrityLevel = 'uncertain';
+    }
+
+    // --- F6: Tax parity ---
+    const taxState = bookingMeta?.taxState || 'unknown';
+    let taxParityState = 'unknown';
+    if (taxState === 'included') {
+      taxParityState = 'aligned';
+    } else if (taxState === 'excluded') {
+      taxParityState = 'mismatch';
+      reasons.push('tax_excluded');
+    } else {
+      reasons.push('tax_unknown');
+    }
+
+    // --- Baseline (Booking price) ---
+    const baseline = bookingMeta?.total ? {
+      total: bookingMeta.total,
+      currency: bookingMeta.currency,
+      priceState: bookingMeta.priceState || 'unknown',
+      taxState: taxState,
+    } : null;
+
+    if (bookingMeta?.priceState === 'from_price') reasons.push('booking_price_from');
+    if (bookingMeta?.priceState === 'unknown') reasons.push('booking_price_unknown');
+
+    // --- Cheapest for savings calculation ---
+    // Use public price if cheapest is gated (keeps claims credible)
+    const cheapestComparable = (cheapestIsGated && cheapestPublic) ? cheapestPublic : cheapestAny;
+
+    // --- Savings calculation ---
+    let savings = null;
+    if (baseline?.total && cheapestComparable?.total && cheapestComparable.total < baseline.total) {
+      const amount = baseline.total - cheapestComparable.total;
+      const pct = amount / baseline.total;
+
+      // Determine savings label
+      const canConfirm =
+        integrityLevel === 'confirmed' &&
+        roomParityState === 'matched' &&
+        currencyState === 'aligned' &&
+        taxParityState !== 'mismatch' &&
+        !cheapestIsGated &&
+        bookingMeta?.priceState === 'selected_total';
+
+      savings = {
+        amount,
+        pct,
+        label: canConfirm ? 'confirmed' : 'potential',
+      };
+
+      // --- H8: Outlier detection ---
+      if (pct >= 0.35 || amount >= 200) {
+        if (integrityLevel !== 'confirmed') {
+          // Degrade one level if not fully confirmed
+          if (integrityLevel === 'likely') integrityLevel = 'uncertain';
+          reasons.push('outlier_savings');
+        }
+      }
+    }
+
+    // --- UI Policy ---
+    const isHardMismatch = integrityLevel === 'mismatch';
+    const isUncertain = integrityLevel === 'uncertain' || integrityLevel === 'likely';
+
+    const uiPolicy = {
+      showPriceRows: !isHardMismatch,
+      showStrongSavings: savings?.label === 'confirmed',
+      showPotentialSavings: savings?.label === 'potential' && !isHardMismatch,
+      showUnconfirmedBadge: isUncertain && !isHardMismatch,
+      showWhyMatchLink: serverUncertain || isUncertain || isHardMismatch,
+      showTaxDisclaimer: taxParityState === 'mismatch' || taxParityState === 'unknown',
+      showCurrencyDisclaimer: currencyState === 'mismatch',
+      showGateDisclaimer: cheapestIsGated && !allOffersGated,
+      showSelectRoomsCTA: roomParityState === 'none_selected' || roomParityState === 'partial',
+      retryMode: (isHardMismatch || serverUncertain || reasons.includes('outlier_savings'))
+        ? 'retry_match'
+        : 'refresh',
+    };
+
+    return {
+      integrityLevel,
+      reasons,
+      roomParityState,
+      taxParityState,
+      currencyState,
+      cheapestAny,
+      cheapestPublic,
+      cheapestComparable,
+      baseline,
+      savings,
+      uiPolicy,
+    };
+  }
+
+  // ========================================
+  // I9: WHY THIS MATCH? MODAL
+  // Shows explanation when match is uncertain
+  // ========================================
+  function showWhyMatchModal(data) {
+    const match = data?.match || {};
+    const candidateSummary = match.candidateSummary || {};
+    const confidence = match.confidence ?? 0;
+
+    // Confidence label
+    let confLabel, confClass;
+    if (confidence >= 0.85) {
+      confLabel = 'High confidence';
+      confClass = 'confidence-high';
+    } else if (confidence >= 0.65) {
+      confLabel = 'Likely';
+      confClass = 'confidence-likely';
+    } else {
+      confLabel = 'Uncertain';
+      confClass = 'confidence-uncertain';
+    }
+
+    // Build candidate list HTML
+    const candidates = candidateSummary.topCandidates || [];
+    let candidateHtml = '';
+    candidates.forEach((c, i) => {
+      const confPct = ((c.confidence || 0) * 100).toFixed(0);
+      const domainBadge = c.domainMatch ? '<span class="domain-badge">Domain</span>' : '';
+      candidateHtml += `
+        <li class="candidate-item">
+          <span class="candidate-rank">${i + 1}.</span>
+          <span class="candidate-name">${escHtml(c.name || 'Unknown')}</span>
+          ${domainBadge}
+          <span class="candidate-conf">${confPct}%</span>
+        </li>
+      `;
+    });
+
+    // Build skipped counts HTML
+    const skippedCounts = candidateSummary.skippedCounts || {};
+    const skippedParts = Object.entries(skippedCounts)
+      .filter(([, count]) => count > 0)
+      .map(([reason, count]) => `${reason.replace(/_/g, ' ')} (${count})`);
+    const skippedHtml = skippedParts.length > 0
+      ? `<div class="skipped-summary">Skipped: ${skippedParts.join(', ')}</div>`
+      : '';
+
+    // Create modal overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'why-match-modal-overlay';
+    overlay.innerHTML = `
+      <div class="why-match-modal">
+        <h3>Why we think this is the hotel</h3>
+        <div class="meta-row">
+          <span class="meta-label">Confidence</span>
+          <span class="meta-value ${confClass}">${confLabel} (${(confidence * 100).toFixed(0)}%)</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Matched hotel</span>
+          <span class="meta-value">${escHtml(match.matchedHotelName || 'Unknown')}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Matched by</span>
+          <span class="meta-value">${escHtml(match.matchedBy || 'name')}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Source</span>
+          <span class="meta-value">${escHtml(match.candidateSummarySource || 'unknown')}</span>
+        </div>
+        ${candidateHtml ? `<ul class="candidate-list">${candidateHtml}</ul>` : ''}
+        ${skippedHtml}
+        <div class="modal-actions">
+          <button class="btn-retry" data-action="retry-match">Retry match</button>
+          <button class="btn-close" data-action="close-modal">Close</button>
+        </div>
+      </div>
+    `;
+
+    // Append to shadow root
+    shadowRoot.appendChild(overlay);
+
+    // Handle clicks
+    overlay.addEventListener('click', (e) => {
+      const action = e.target.dataset.action;
+      if (action === 'close-modal' || e.target === overlay) {
+        overlay.remove();
+      } else if (action === 'retry-match') {
+        overlay.remove();
+        // Trigger smart retry
+        const refreshBtn = shadowRoot.getElementById('compare-refresh');
+        if (refreshBtn) {
+          refreshBtn.dataset.expensive = 'true';
+          refreshBtn.click();
+        }
+      }
+    });
+  }
+
   // --- BOOK DIRECT URL HELPERS ---
   function isHttpUrl(u) {
     try { const x = new URL(u); return x.protocol === 'http:' || x.protocol === 'https:'; }
@@ -2249,15 +2689,21 @@ Best regards,`;
   }
 
   // --- FOOTER UPDATE FUNCTION ---
+  // J10: Uses uiPolicy.retryMode for smart retry behavior
   function updateCompareFooter() {
     const data = _lastCompareData;
-    // Include sanity state in retry logic (block/warn both trigger retry)
-    const showRetry = _currentMismatch || data?.error || data?.matchUncertain || _sanityState;
+    const uiPolicy = _integrityAssessment?.uiPolicy || {};
+    const retryMode = uiPolicy.retryMode || 'refresh';
+
     const now = Date.now();
     const cooldownRemaining = Math.max(0, Math.ceil((_retryMatchCooldownUntil - now) / 1000));
 
-    if (showRetry) {
-      if (cooldownRemaining > 0) {
+    // J10: Apply cooldown only to 'retry_match' mode (expensive)
+    const isCooldownActive = retryMode === 'retry_match' && cooldownRemaining > 0;
+
+    if (retryMode === 'retry_match') {
+      // Match mode: expensive retry with smart flag
+      if (isCooldownActive) {
         compareRefresh.textContent = 'Retry match';
         compareRefresh.style.pointerEvents = 'none';
         compareRefresh.style.opacity = '0.5';
@@ -2266,9 +2712,15 @@ Best regards,`;
         compareRefresh.style.pointerEvents = '';
         compareRefresh.style.opacity = '';
       }
-      // Block-level sanity issues use smart retry
-      compareRefresh.dataset.expensive = (_sanityState?.severity === 'block') ? 'true' : 'true';
+      compareRefresh.dataset.expensive = 'true';
+    } else if (uiPolicy.showSelectRoomsCTA) {
+      // Rooms mode: nudge to select rooms (no API call)
+      compareRefresh.textContent = 'Select rooms to confirm';
+      compareRefresh.style.pointerEvents = '';
+      compareRefresh.style.opacity = '';
+      compareRefresh.dataset.expensive = 'false';
     } else {
+      // Normal refresh
       compareRefresh.textContent = 'Refresh';
       compareRefresh.style.pointerEvents = '';
       compareRefresh.style.opacity = '';
@@ -2377,23 +2829,47 @@ Best regards,`;
       }
     }
 
+    // --- INTEGRITY ASSESSMENT (Workstream A-K) ---
+    // Build booking meta from current state
+    const viewingTotal = parseMoneyToNumber(_price);
+    const viewingCurrency = inferCurrencyFromPrice(_price);
+    const bookingMeta = {
+      total: viewingTotal,
+      currency: viewingCurrency,
+      priceState: _priceState || 'unknown',
+      taxState: _priceTaxState || 'unknown', // From updateViewingPrice
+    };
+
+    _integrityAssessment = assessComparisonIntegrity({
+      compareData: data,
+      bookingMeta,
+      mergedSelections,
+      selectionCheapest,
+    });
+
+    Logger.debug('Integrity assessment:', _integrityAssessment);
+
     let html = '';
     let hasAnyRows = false;  // Track if any price rows were rendered
 
     // Show mismatch warning at top if detected (escaped for XSS safety)
+    // I9: Include "Why this match?" link if candidateSummary available
+    const candidateSummary = data.match?.candidateSummary || null;
+    const showWhyMatchLink = _currentMismatch && candidateSummary;
+
     if (_currentMismatch && matchedHotelName) {
       html += `
         <div class="compare-mismatch-warning">
           ⚠️ ${hardMismatch ? 'Prices may be for:' : 'Match uncertain — prices may be for:'}
           <strong>${escHtml(matchedHotelName)}</strong>
+          ${showWhyMatchLink ? '<span class="why-match-link" data-action="why-match">Why this match?</span>' : ''}
         </div>
       `;
       // Note: We no longer null cheapestOverall here.
       // Hard mismatch suppresses rows via allowPriceRows; soft uncertainty shows rows with "Unconfirmed" badge.
     }
 
-    // Parse the visible page price EARLY (needed for smart badge display)
-    const viewingTotal = parseMoneyToNumber(_price);
+    // viewingTotal already computed above in integrity assessment
     Logger.debug('Page price for comparison:', { _price, viewingTotal });
 
     // --- USE SELECTION-CHEAPEST FOR DISPLAY ---
@@ -2416,7 +2892,7 @@ Best regards,`;
     const displayHasGate = displayBadges.some(b => ['Member', 'Login', 'Mobile'].includes(b));
 
     // --- PRICE SANITY CHECK ---
-    const viewingCurrency = inferCurrencyFromPrice(_price);
+    // viewingCurrency already computed above in integrity assessment
     _sanityState = computePriceSanity({
       viewingTotal,
       viewingCurrency,
@@ -2691,6 +3167,12 @@ Best regards,`;
     compareTimestamp.textContent = `Checked ${formatTimestamp(data.fetchedAt)}`;
     showCompareState('results');
     updateCompareFooter();
+
+    // I9: Add click handler for "Why this match?" link
+    const whyMatchLink = compareResults.querySelector('[data-action="why-match"]');
+    if (whyMatchLink) {
+      whyMatchLink.addEventListener('click', () => showWhyMatchModal(data));
+    }
   }
 
   // Fetch compare data from background
@@ -2950,8 +3432,9 @@ Best regards,`;
     // Track state for label/savings computation
     _priceState = priceObj.state || 'unknown';
     _priceNumber = Number.isFinite(priceObj.totalNumber) ? priceObj.totalNumber : null;
+    _priceTaxState = priceObj.taxState || 'unknown'; // F6: Tax state for integrity assessment
 
-    Logger.debug('updateViewingPrice:', { state: _priceState, totalNumber: _priceNumber, rawText: priceObj.rawText });
+    Logger.debug('updateViewingPrice:', { state: _priceState, totalNumber: _priceNumber, taxState: _priceTaxState, rawText: priceObj.rawText });
 
     // Update hero label based on state
     const heroLabel = shadowRoot.querySelector('.label');
