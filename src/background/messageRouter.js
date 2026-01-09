@@ -36,6 +36,7 @@ import { getCompareKey } from './compareCache.js';
  * @param {Object} deps.workerClient - Worker API client
  * @param {Function} deps.storeCtxId - Context ID storage function
  * @param {Function} deps.fetchCompareDeduped - Deduplicated fetch function
+ * @param {Object} deps.ensurePageContextHelper - Page context helper with ensurePageContext and handlePageContextResponse
  * @returns {Function} Message handler (message, sender, sendResponse) => boolean
  */
 export function createMessageRouter({
@@ -47,7 +48,8 @@ export function createMessageRouter({
     refreshThrottle,
     workerClient,
     storeCtxId,
-    fetchCompareDeduped
+    fetchCompareDeduped,
+    ensurePageContextHelper
 }) {
     // Helper to ensure consistent error responses with error_code
     function sendError(sendResponseFn, error_code, error, extra = {}) {
@@ -78,7 +80,12 @@ export function createMessageRouter({
         if (message.type === MSG_PAGE_CONTEXT) {
             if (tabId) {
                 tabContextStore.set(tabId, message.payload);
-                log('Stored page context for tab', tabId);
+                log('Stored page context for tab', tabId, message.requestId ? `(requestId: ${message.requestId})` : '');
+
+                // Resolve pending handshake if requestId present
+                if (message.requestId && ensurePageContextHelper) {
+                    ensurePageContextHelper.handlePageContextResponse(tabId, message.payload, message.requestId);
+                }
             }
             sendResponse({ success: true });
             return false;
@@ -164,110 +171,144 @@ export function createMessageRouter({
 
         // --- Get compare data ---
         if (message.type === MSG_GET_COMPARE_DATA) {
-            const context = tabId ? tabContextStore.get(tabId) : null;
+            // Use ensurePageContext for self-healing context recovery
+            (async () => {
+                let context;
 
-            if (!context) {
-                // Request content script to resend page context (it may have been lost on extension reload)
-                if (tabId) {
-                    log('No page context, requesting resend from tab', tabId);
-                    chrome.tabs.sendMessage(tabId, { type: MSG_RESEND_PAGE_CONTEXT }).catch(() => { });
+                if (ensurePageContextHelper && tabId) {
+                    context = await ensurePageContextHelper.ensurePageContext(tabId, message.bookingUrl);
+                } else {
+                    context = tabId ? tabContextStore.get(tabId) : null;
                 }
-                sendError(sendResponse, ERR_NO_PAGE_CONTEXT, 'No page context available', { needsPageContext: true });
-                return false;
-            }
 
-            // Merge officialUrl, hotelName, bookingUrl, smart from message if provided
-            const params = {
-                ...context,
-                officialUrl: message.officialUrl || context.officialUrl,
-                hotelName: message.hotelName || context.hotelName,
-                bookingUrl: message.bookingUrl || context.bookingUrl,
-                smart: message.smart !== undefined ? message.smart : context.smart // FIX: Forward smart flag
-            };
-
-            // Check if we have required params
-            if (!params.checkIn || !params.checkOut) {
-                sendError(sendResponse, ERR_NO_DATES, 'Missing dates', { needsDates: true });
-                return false;
-            }
-
-            // Check cache first (unless forcing refresh)
-            if (!message.forceRefresh) {
-                const key = getCompareKey(tabId, params);
-                const cached = compareCache.get(key);
-                if (cached) {
-                    log('Returning cached compare data');
-                    sendResponse({ ...cached, cache: 'hit' });
-                    return false;
+                if (!context) {
+                    log('No page context after ensurePageContext, returning error');
+                    sendError(sendResponse, ERR_NO_PAGE_CONTEXT, 'No page context available', {
+                        needsPageContext: true,
+                        details: {
+                            tabId,
+                            hadMemoryCtx: false,
+                            hadSessionCtx: false,
+                            resendAttempted: !!ensurePageContextHelper,
+                            resendResult: 'timeout',
+                            bookingUrl: message.bookingUrl
+                        }
+                    });
+                    return;
                 }
-            }
 
-            // Fetch with dedupe
-            fetchCompareDeduped(tabId, params, message.forceRefresh).then(data => {
-                if (!data.error) {
+                // Merge officialUrl, hotelName, bookingUrl, smart from message if provided
+                const params = {
+                    ...context,
+                    officialUrl: message.officialUrl || context.officialUrl,
+                    hotelName: message.hotelName || context.hotelName,
+                    bookingUrl: message.bookingUrl || context.bookingUrl,
+                    smart: message.smart !== undefined ? message.smart : context.smart
+                };
+
+                // Check if we have required params
+                if (!params.checkIn || !params.checkOut) {
+                    sendError(sendResponse, ERR_NO_DATES, 'Missing dates', { needsDates: true });
+                    return;
+                }
+
+                // Check cache first (unless forcing refresh)
+                if (!message.forceRefresh) {
                     const key = getCompareKey(tabId, params);
-                    compareCache.set(key, data);
+                    const cached = compareCache.get(key);
+                    if (cached) {
+                        log('Returning cached compare data');
+                        sendResponse({ ...cached, cache: 'hit' });
+                        return;
+                    }
                 }
-                sendResponse(data);
-            }).catch(err => {
-                sendError(sendResponse, ERR_NETWORK, err.message || 'Network error');
-            });
+
+                // Fetch with dedupe
+                try {
+                    const data = await fetchCompareDeduped(tabId, params, message.forceRefresh);
+                    if (!data.error) {
+                        const key = getCompareKey(tabId, params);
+                        compareCache.set(key, data);
+                    }
+                    sendResponse(data);
+                } catch (err) {
+                    sendError(sendResponse, ERR_NETWORK, err.message || 'Network error');
+                }
+            })();
 
             return true; // Keep channel open for async
         }
 
         // --- Refresh compare (force fresh fetch) ---
         if (message.type === MSG_REFRESH_COMPARE) {
-            const context = tabId ? tabContextStore.get(tabId) : null;
+            // Use ensurePageContext for self-healing context recovery
+            (async () => {
+                let context;
 
-            if (!context) {
-                sendError(sendResponse, ERR_NO_PAGE_CONTEXT, 'No page context available', { needsPageContext: true });
-                return false;
-            }
+                if (ensurePageContextHelper && tabId) {
+                    context = await ensurePageContextHelper.ensurePageContext(tabId, message.bookingUrl);
+                } else {
+                    context = tabId ? tabContextStore.get(tabId) : null;
+                }
 
-            const params = {
-                ...context,
-                officialUrl: message.officialUrl || context.officialUrl,
-                hotelName: message.hotelName || context.hotelName,
-                bookingUrl: message.bookingUrl || context.bookingUrl,
-                smart: message.smart !== undefined ? message.smart : context.smart // FIX: Forward smart flag
-            };
-
-            // Throttle key uses bookingUrl (most unique) or falls back to params
-            const throttleKey = params.bookingUrl
-                || `${params.gl || ''}|${params.hotelName}|${params.checkIn}|${params.checkOut}|${params.adults || ''}|${params.currency || ''}`;
-
-            const now = Date.now();
-            const reason = message.reason;
-
-            // Throttle user-initiated refreshes, but bypass for system refresh
-            if (refreshThrottle.shouldThrottle(throttleKey, now, reason)) {
-                const key = getCompareKey(tabId, params);
-                const cached = compareCache.get(key);
-                if (cached) {
-                    log('Force refresh throttled, returning cached');
-                    sendResponse({
-                        ...cached,
-                        throttled: true,
-                        retryAfterMs: refreshThrottle.getRetryAfterMs(throttleKey, now)
+                if (!context) {
+                    log('No page context after ensurePageContext for refresh, returning error');
+                    sendError(sendResponse, ERR_NO_PAGE_CONTEXT, 'No page context available', {
+                        needsPageContext: true,
+                        details: {
+                            tabId,
+                            resendAttempted: !!ensurePageContextHelper,
+                            bookingUrl: message.bookingUrl
+                        }
                     });
-                    return false;
+                    return;
                 }
-            }
 
-            // Set cooldown
-            refreshThrottle.setCooldown(throttleKey, now, reason);
+                const params = {
+                    ...context,
+                    officialUrl: message.officialUrl || context.officialUrl,
+                    hotelName: message.hotelName || context.hotelName,
+                    bookingUrl: message.bookingUrl || context.bookingUrl,
+                    smart: message.smart !== undefined ? message.smart : context.smart
+                };
 
-            // Force refresh bypasses cache (but still dedupes in-flight)
-            fetchCompareDeduped(tabId, params, true).then(data => {
-                if (!data.error) {
+                // Throttle key uses bookingUrl (most unique) or falls back to params
+                const throttleKey = params.bookingUrl
+                    || `${params.gl || ''}|${params.hotelName}|${params.checkIn}|${params.checkOut}|${params.adults || ''}|${params.currency || ''}`;
+
+                const now = Date.now();
+                const reason = message.reason;
+
+                // Throttle user-initiated refreshes, but bypass for system refresh
+                if (refreshThrottle.shouldThrottle(throttleKey, now, reason)) {
                     const key = getCompareKey(tabId, params);
-                    compareCache.set(key, data);
+                    const cached = compareCache.get(key);
+                    if (cached) {
+                        log('Force refresh throttled, returning cached');
+                        sendResponse({
+                            ...cached,
+                            throttled: true,
+                            retryAfterMs: refreshThrottle.getRetryAfterMs(throttleKey, now)
+                        });
+                        return;
+                    }
                 }
-                sendResponse(data);
-            }).catch(err => {
-                sendError(sendResponse, ERR_NETWORK, err.message || 'Network error');
-            });
+
+                // Set cooldown
+                refreshThrottle.setCooldown(throttleKey, now, reason);
+
+                // Force refresh bypasses cache (but still dedupes in-flight)
+                try {
+                    const data = await fetchCompareDeduped(tabId, params, true);
+                    if (!data.error) {
+                        const key = getCompareKey(tabId, params);
+                        compareCache.set(key, data);
+                    }
+                    sendResponse(data);
+                } catch (err) {
+                    sendError(sendResponse, ERR_NETWORK, err.message || 'Network error');
+                }
+            })();
 
             return true;
         }

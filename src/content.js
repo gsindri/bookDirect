@@ -470,6 +470,7 @@
      */
     function getAllReserveButtons() {
         const selectors = [
+            '#hp_book_now_button',          // New 2026 button ID
             '.js-reservation-button',
             'button[type="submit"].hprt-reservation-cta__book',
             '.hprt-reservation-cta button[type="submit"]',
@@ -522,7 +523,31 @@
         const vy = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
         const visibleArea = (vx * vy) / 1000; // Scale down to not dominate
 
-        return rightBias + widthScore + inViewportBonus + visibleArea;
+        // PENALTY: Buttons in sticky/fixed positioned containers should be avoided
+        // These are typically header/sidebar clones, not the main room table button
+        let stickyPenalty = 0;
+        let parent = btn.parentElement;
+        while (parent && parent !== document.documentElement) {
+            const pcs = getComputedStyle(parent);
+            if (pcs.position === 'sticky' || pcs.position === 'fixed') {
+                stickyPenalty = -2000; // Strong penalty for sticky containers
+                break;
+            }
+            parent = parent.parentElement;
+        }
+
+        // PENALTY: Buttons very close to the top of viewport are likely sticky clones
+        // The main room table reserve button is usually further down
+        const topPenalty = (r.top < 250) ? -800 : 0;
+
+        // BONUS: Buttons inside room table container (the correct dock zone)
+        let roomTableBonus = 0;
+        if (btn.closest('.hprt-table') || btn.closest('#hprt-table') ||
+            btn.closest('[data-block-id]') || btn.closest('.roomstable')) {
+            roomTableBonus = 1500; // Strong preference for room table buttons
+        }
+
+        return rightBias + widthScore + inViewportBonus + visibleArea + stickyPenalty + topPenalty + roomTableBonus;
     }
 
     /**
@@ -761,10 +786,13 @@
         }
 
         // Check if any sticky/fixed ancestor is far above viewport
+        // Also reject buttons in sticky/fixed containers entirely (unless already docked to them)
         let parent = anchorEl.parentElement;
+        let inStickyContainer = false;
         while (parent && parent !== document.documentElement) {
             const pcs = getComputedStyle(parent);
             if (pcs.position === 'sticky' || pcs.position === 'fixed') {
+                inStickyContainer = true;
                 const pRect = parent.getBoundingClientRect();
                 if (pRect.bottom < -200) {
                     return false;
@@ -774,6 +802,13 @@
                 return false;
             }
             parent = parent.parentElement;
+        }
+
+        // IMPORTANT: When not yet docked, reject buttons in sticky/fixed containers
+        // These are typically sticky header clones, not the main room table button
+        // Only allow sticky container buttons if already docked there (for stickiness)
+        if (inStickyContainer && PLACEMENT.mode !== 'button') {
+            return false;
         }
 
         return true;
@@ -953,6 +988,9 @@
         PLACEMENT.lastSwitchAt = now;
         PLACEMENT.pendingMode = null;
 
+        // Set data attribute for CSS styling based on placement mode
+        uiRoot.dataset.bdPlacement = newMode;
+
         // Repair layout after mode change (fixes gap issues)
         if (oldMode && oldMode !== newMode) {
             repairBookingLayout(`mode-change:${oldMode}->${newMode}`);
@@ -1101,6 +1139,9 @@
             hotelName: [
                 '#hp_hotel_name h2',           // Most specific: h2 inside the name container
                 '#hp_hotel_name_header',
+                '[data-testid="property-header-display-title"]', // New 2026 testid
+                'h1[class*="header"]',          // Fallback: H1 with header in class
+                'h2[class*="header"]',          // Fallback: H2 with header in class
                 '.pp-header__title',
                 '.hp__hotel-name',
                 '[data-testid="header-title"]',
@@ -1344,9 +1385,36 @@
             if (numMatch) currentOtaPriceTotal = numMatch;
         }
 
-        // 6. Get hotel name (clean badges/certifications)
-        const nameEl = findElement(SELECTORS.details.hotelName);
-        const hotelName = cleanHotelName(nameEl ? nameEl.innerText : null);
+        // 6. Get hotel name (clean badges/certifications) with fallbacks
+        let nameEl = findElement(SELECTORS.details.hotelName);
+        let hotelName = null;
+
+        if (nameEl) {
+            hotelName = cleanHotelName(nameEl.innerText);
+        }
+
+        // Fallback 1: Find visible H2 elements
+        if (!hotelName) {
+            const h2s = document.querySelectorAll('h2');
+            for (const h2 of h2s) {
+                if (h2.innerText && h2.innerText.trim().length > 3 && isVisible(h2)) {
+                    const text = h2.innerText.trim();
+                    if (text.length < 50 && !text.toLowerCase().includes('reserve') &&
+                        !text.toLowerCase().includes('select')) {
+                        hotelName = cleanHotelName(text);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Fallback 2: Extract from URL
+        if (!hotelName) {
+            const urlMatch = window.location.pathname.match(/\/hotel\/[a-z]{2}\/([^/.]+)/i);
+            if (urlMatch) {
+                hotelName = urlMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            }
+        }
 
         // 7. Current host
         const currentHost = window.location.hostname;
@@ -1391,7 +1459,8 @@
     }
 
     // Send page context to background (for /compare calls)
-    function sendPageContext() {
+    // requestId: Optional ID for deterministic handshake (used when background requests resend)
+    function sendPageContext(requestId) {
         const itinerary = extractItinerary();
 
         // Only send if we have hotel name
@@ -1401,13 +1470,14 @@
         // The old sessionStorage lookup was loose and could select wrong ctxId
         // Background.js handles ctx lookup based on tabId + itinerary key
 
-        console.log('bookDirect: Sending page context', itinerary);
+        console.log('bookDirect: Sending page context', itinerary, requestId ? `(requestId: ${requestId})` : '');
         console.log('bookDirect: Dates extracted:', itinerary.checkIn, '->', itinerary.checkOut);
 
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
             chrome.runtime.sendMessage({
                 type: BookDirect.Contracts.MSG_BOOKDIRECT_PAGE_CONTEXT,
-                payload: itinerary
+                payload: itinerary,
+                requestId: requestId || undefined // Include for handshake resolution
             });
         }
     }
@@ -1416,8 +1486,8 @@
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
         chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (message.type === BookDirect.Contracts.MSG_RESEND_PAGE_CONTEXT) {
-                console.log('bookDirect: Resending page context on request');
-                sendPageContext();
+                console.log('bookDirect: Resending page context on request', message.requestId ? `(requestId: ${message.requestId})` : '');
+                sendPageContext(message.requestId); // Pass requestId for handshake
                 sendResponse({ sent: true });
             }
         });
@@ -1471,7 +1541,8 @@
         }
 
         // 1. ANCHOR: The "I'll Reserve" Button (specific selectors only, no generic submit)
-        const button = document.querySelector('.js-reservation-button') ||
+        const button = document.querySelector('#hp_book_now_button') ||  // New 2026 button ID
+            document.querySelector('.js-reservation-button') ||
             document.querySelector('button[type="submit"].hprt-reservation-cta__book') ||
             document.querySelector('.hprt-reservation-cta button[type="submit"]') ||
             document.querySelector('button.bui-button--primary[type="submit"]');
@@ -1502,8 +1573,44 @@
         // DEBUG: Visualize the Scope
         // scope.style.border = '2px dashed blue'; // REMOVED FOR PRODUCTION
 
-        const nameEl = findElement(SELECTORS.details.hotelName);
-        const hotelName = cleanHotelName(nameEl ? nameEl.innerText : null) || 'Hotel';
+        // Try to find hotel name from selectors, with fallbacks
+        let nameEl = findElement(SELECTORS.details.hotelName);
+        let hotelName = null;
+
+        if (nameEl) {
+            hotelName = cleanHotelName(nameEl.innerText);
+        }
+
+        // Fallback 1: Find the first visible H2 on the page (often the hotel name)
+        if (!hotelName) {
+            const h2s = document.querySelectorAll('h2');
+            for (const h2 of h2s) {
+                if (h2.innerText && h2.innerText.trim().length > 3 && isVisible(h2)) {
+                    const text = h2.innerText.trim();
+                    // Skip if it looks like a section header (very short or generic)
+                    if (text.length < 50 && !text.toLowerCase().includes('reserve') &&
+                        !text.toLowerCase().includes('select') && !text.toLowerCase().includes('choose')) {
+                        hotelName = cleanHotelName(text);
+                        console.log('[bookDirect] Found hotel name from H2 fallback:', hotelName);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Fallback 2: Extract from URL path (e.g., /hotel/us/walker-tribeca.html -> Walker Tribeca)
+        if (!hotelName) {
+            const pathMatch = window.location.pathname.match(/\/hotel\/[a-z]{2}\/([^/.]+)/i);
+            if (pathMatch) {
+                // Convert slug to title case: "walker-tribeca" -> "Walker Tribeca"
+                hotelName = pathMatch[1]
+                    .replace(/-/g, ' ')
+                    .replace(/\b\w/g, c => c.toUpperCase());
+                console.log('[bookDirect] Extracted hotel name from URL:', hotelName);
+            }
+        }
+
+        hotelName = hotelName || 'Hotel';
 
         // --- BOOKING VIEWING PRICE RESOLVER ---
         // Multi-pass resolver returning structured price state
@@ -2129,9 +2236,18 @@
 
         const hotelNameEl = findElement(hotelNameSelectors);
 
+        // URL-based fallback: if we're on a hotel page URL, try injecting anyway
+        const isHotelUrl = window.location.pathname.includes('/hotel/');
+
         if (hotelNameEl) {
             // Hotel element found! Attempt injection
             Logger.info('Hotel element found, attempting injection');
+            inject();
+            return;
+        } else if (isHotelUrl && document.readyState !== 'loading') {
+            // We're on a hotel URL but can't find the element - try injecting anyway
+            // This handles cases where Booking.com uses obfuscated/changing class names
+            Logger.info('Hotel URL detected but no hotel element found via selectors, attempting injection anyway');
             inject();
             return;
         }

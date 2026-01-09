@@ -51,6 +51,13 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   let _bookDirectUrl = null; // Best URL for Book Direct button
   let _bookDirectUrlSource = null; // 'hotelDetails' | 'compareOffer' | 'compareProperty'
   let _selectedRooms = []; // Structured room selection: [{ name, count }]
+  let _activePanel = null; // null | 'direct' | 'prices' - UI state for two-panel progressive disclosure
+
+  // Chip status states
+  let _directStatus = 'idle'; // 'idle' | 'loading' | 'ready' | 'empty' | 'error'
+  let _compareStatus = 'idle'; // 'idle' | 'loading' | 'ready' | 'noDates' | 'error'
+  let _directPulsed = false; // Prevent re-pulsing
+  let _comparePulsed = false; // Prevent re-pulsing
 
   // Get icon URL (needs to be computed before template)
   const iconUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
@@ -100,15 +107,32 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     `;
 
   const commonStyle = `
+      /* ========================================
+         BRAND COLOR SYSTEM
+         Distinct from Booking.com (indigo vs blue)
+         ======================================== */
+      :host {
+        --bd-accent: #6366f1;           /* Indigo 500 - primary accent */
+        --bd-accent-dark: #4f46e5;      /* Indigo 600 - hover/active */
+        --bd-accent-light: #a5b4fc;     /* Indigo 300 - subtle highlights */
+        --bd-surface: #ffffff;
+        --bd-text: #1f2937;
+        --bd-muted: #6b7280;
+        --bd-success: #059669;          /* Green for savings */
+        --bd-success-light: rgba(5, 150, 105, 0.1);
+        --bd-border: rgba(0, 0, 0, 0.08);
+        --bd-border-strong: rgba(0, 0, 0, 0.15);
+      }
+
       /* 1. Base Container: Modern & Clean */
       .container {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        background: #ffffff;
-        color: #1a1a1a;
+        background: var(--bd-surface);
+        color: var(--bd-text);
         padding: 24px;
         border-radius: 16px;
         box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-        border: 1px solid rgba(0,0,0,0.05);
+        border: 1px solid var(--bd-border);
         transition: transform 0.3s ease;
         animation: slideIn 0.5s ease-out;
       }
@@ -295,7 +319,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         visibility: visible;
       }
 
-      /* 4. Primary Button: Premium styling */
+      /* 4. Primary Button: Premium styling with indigo accent */
       button, .btn-primary {
         width: 100%;
         height: 50px;
@@ -306,7 +330,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         gap: 10px;
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.10);
-        background: #0b4bb3;
+        background: var(--bd-accent);
         color: #fff;
         font-size: 16px;
         font-weight: 700;
@@ -314,7 +338,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         white-space: nowrap;
         cursor: pointer;
         box-shadow:
-          0 10px 18px rgba(2,6,23,0.14),
+          0 10px 18px rgba(99, 102, 241, 0.25),
           0  2px  6px rgba(2,6,23,0.08);
         transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
       }
@@ -975,6 +999,185 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         font-size: 9px;
         padding: 2px 4px;
       }
+
+      /* Two-button CTA grid */
+      .cta-grid {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .cta-grid.two-col {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      /* Panel styling (progressive disclosure containers) */
+      .panel {
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid rgba(0,0,0,0.06);
+        animation: panelSlideIn 0.2s ease-out;
+      }
+      @keyframes panelSlideIn {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      /* Active button indicator */
+      .btn-primary.is-active,
+      .btn-secondary.is-active {
+        box-shadow: inset 0 0 0 2px #003580;
+      }
+
+      /* Panel back/close link */
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .panel-title {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #64748b;
+      }
+      .panel-close {
+        font-size: 11px;
+        color: #94a3b8;
+        cursor: pointer;
+        transition: color 0.15s;
+      }
+      .panel-close:hover {
+        color: var(--bd-accent);
+        text-decoration: underline;
+      }
+
+      /* ========================================
+         STATUS CHIPS (inside buttons)
+         ======================================== */
+      .btn-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        max-width: 100px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: background 0.2s, color 0.2s;
+      }
+
+      /* Chip on primary button (light on dark) */
+      .btn-primary .btn-chip {
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+      }
+
+      /* Chip on secondary button (accent on white) */
+      .btn-secondary .btn-chip {
+        background: var(--bd-success-light);
+        color: var(--bd-success);
+      }
+
+      .btn-secondary .btn-chip.loading {
+        background: rgba(99, 102, 241, 0.1);
+        color: var(--bd-accent);
+      }
+
+      /* Chip spinner */
+      .btn-chip .chip-spinner {
+        width: 10px;
+        height: 10px;
+        border: 1.5px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      /* ========================================
+         PULSE ANIMATION (value discovered)
+         ======================================== */
+      @keyframes bd-pulse {
+        0% { box-shadow: 0 0 0 0 var(--bd-accent); }
+        70% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+      }
+
+      .btn-pulse {
+        animation: bd-pulse 1.2s ease-out;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .btn-pulse { animation: none; }
+      }
+
+      /* ========================================
+         RESPONSIVE BREAKPOINTS
+         Compact: < 340px, Ultra-compact: < 290px
+         ======================================== */
+      :host(.bd-compact) .price-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+
+      :host(.bd-compact) .price-label {
+        font-size: 11px;
+      }
+
+      :host(.bd-compact) .hotel-name {
+        font-size: 22px;
+      }
+
+      :host(.bd-ultra-compact) .hotel-name {
+        font-size: 20px;
+        -webkit-line-clamp: 2;
+      }
+
+      :host(.bd-ultra-compact) .price-label {
+        display: none;
+      }
+
+      /* Buttons always full width, with flexible content */
+      .cta-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .cta-grid button,
+      .cta-grid .btn-primary,
+      .cta-grid .btn-secondary {
+        width: 100%;
+        justify-content: space-between;
+        padding: 0 16px;
+      }
+
+      .cta-grid .btn-label {
+        flex: 0 0 auto;
+      }
+
+      /* ========================================
+         PLACEMENT-SPECIFIC STYLING
+         Styles differ for overlay vs docked modes
+         ======================================== */
+      :host([data-bd-placement="overlay"]) .container {
+        box-shadow: 
+          0 20px 40px rgba(0, 0, 0, 0.15),
+          0 4px 12px rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--bd-accent-light);
+      }
+
+      :host([data-bd-placement="button"]) .container,
+      :host([data-bd-placement="rail"]) .container {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        border: 1px solid var(--bd-border-strong);
+      }
     `;
 
   const html = `
@@ -1004,9 +1207,24 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
                 </div>
             </div>
 
-            <!-- Direct Deal Section (Hidden by default, shown when data available) -->
-            <div id="direct-deal-section" style="display:none;">
-              <div class="section-header">Direct Deal Options<span class="info-icon" data-tooltip="We draft the email for you. Nothing is sent automatically."></span></div>
+            <!-- Two-button CTA grid (always visible) -->
+            <div class="cta-grid" id="cta-grid">
+              <button id="btn-open-direct" class="btn-primary">
+                <span class="btn-label">Book direct</span>
+                <span id="chip-direct" class="btn-chip" style="display:none;"></span>
+              </button>
+              <button id="btn-open-prices" class="btn-secondary">
+                <span class="btn-label">Find lowest price</span>
+                <span id="chip-prices" class="btn-chip" style="display:none;"></span>
+              </button>
+            </div>
+
+            <!-- Panel: Direct options (hidden by default) -->
+            <section id="panel-direct" class="panel" style="display:none;">
+              <div class="panel-header">
+                <span class="panel-title">Direct Booking Options</span>
+                <span id="panel-direct-close" class="panel-close">Close ✕</span>
+              </div>
               
               <!-- Email buttons (shown if found_email exists) -->
               <div id="email-actions" style="display:none;">
@@ -1021,11 +1239,14 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
               
               <!-- Dynamic buttons: Website & Phone -->
               <div id="dynamic-buttons" class="dynamic-buttons"></div>
-            </div>
+            </section>
             
-            <!-- Price Comparison Section (Hidden by default) -->
-            <div id="compare-section" class="compare-section" style="display:none;">
-              <div class="compare-header">Prices found</div>
+            <!-- Panel: Prices comparison (hidden by default) -->
+            <section id="panel-prices" class="panel" style="display:none;">
+              <div class="panel-header">
+                <span class="panel-title">Prices Found</span>
+                <span id="panel-prices-close" class="panel-close">Close ✕</span>
+              </div>
               <div id="compare-content" class="compare-content">
                 <!-- Loading state -->
                 <div id="compare-loading" class="compare-loading" style="display:none;">
@@ -1045,7 +1266,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
                 <span id="compare-timestamp"></span>
                 <span id="compare-refresh" class="compare-refresh">Refresh</span>
               </div>
-            </div>
+            </section>
             
             <div id="toast" class="toast">Screenshot copied! Paste it in your email.</div>
             </div>
@@ -1054,6 +1275,127 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
     `;
 
   shadowRoot.innerHTML = `<style>${baseStyle}${commonStyle}</style>${html}`;
+
+  // ========================================
+  // PANEL TOGGLE LOGIC (Two-button progressive disclosure)
+  // ========================================
+  const panelDirect = shadowRoot.getElementById('panel-direct');
+  const panelPrices = shadowRoot.getElementById('panel-prices');
+  const btnOpenDirect = shadowRoot.getElementById('btn-open-direct');
+  const btnOpenPrices = shadowRoot.getElementById('btn-open-prices');
+  const panelDirectClose = shadowRoot.getElementById('panel-direct-close');
+  const panelPricesClose = shadowRoot.getElementById('panel-prices-close');
+
+  function setActivePanel(next) {
+    _activePanel = (next === _activePanel) ? null : next; // Toggle behavior
+    updatePanelVisibility();
+  }
+
+  function updatePanelVisibility() {
+    // Show/hide panels
+    if (panelDirect) panelDirect.style.display = (_activePanel === 'direct') ? 'block' : 'none';
+    if (panelPrices) panelPrices.style.display = (_activePanel === 'prices') ? 'block' : 'none';
+
+    // Update button active states
+    if (btnOpenDirect) btnOpenDirect.classList.toggle('is-active', _activePanel === 'direct');
+    if (btnOpenPrices) btnOpenPrices.classList.toggle('is-active', _activePanel === 'prices');
+
+    // If prices panel just opened and we have data, ensure it's rendered
+    if (_activePanel === 'prices' && _lastCompareData) {
+      renderCompareResults(_lastCompareData);
+    }
+  }
+
+  // Bind CTA button clicks
+  if (btnOpenDirect) {
+    btnOpenDirect.onclick = () => setActivePanel('direct');
+  }
+  if (btnOpenPrices) {
+    btnOpenPrices.onclick = () => setActivePanel('prices');
+  }
+
+  // Bind panel close buttons
+  if (panelDirectClose) {
+    panelDirectClose.onclick = () => setActivePanel(null);
+  }
+  if (panelPricesClose) {
+    panelPricesClose.onclick = () => setActivePanel(null);
+  }
+
+  // ========================================
+  // CHIP UPDATE HELPERS
+  // ========================================
+  const chipDirect = shadowRoot.getElementById('chip-direct');
+  const chipPrices = shadowRoot.getElementById('chip-prices');
+
+  /**
+   * Update the direct button chip
+   * @param {{ text: string, loading?: boolean }} opts
+   */
+  function updateDirectChip({ text, loading = false }) {
+    if (!chipDirect) return;
+    if (!text) {
+      chipDirect.style.display = 'none';
+      return;
+    }
+    chipDirect.style.display = 'inline-flex';
+    chipDirect.classList.toggle('loading', loading);
+    chipDirect.innerHTML = loading
+      ? `<span class="chip-spinner"></span>${escHtml(text)}`
+      : escHtml(text);
+  }
+
+  /**
+   * Update the prices button chip
+   * @param {{ text: string, loading?: boolean, isSavings?: boolean }} opts
+   */
+  function updatePricesChip({ text, loading = false, isSavings = false }) {
+    if (!chipPrices) return;
+    if (!text) {
+      chipPrices.style.display = 'none';
+      return;
+    }
+    chipPrices.style.display = 'inline-flex';
+    chipPrices.classList.toggle('loading', loading);
+    // Green chip for savings, accent for loading
+    if (isSavings) {
+      chipPrices.style.background = 'var(--bd-success-light)';
+      chipPrices.style.color = 'var(--bd-success)';
+    } else if (loading) {
+      chipPrices.style.background = 'rgba(99, 102, 241, 0.1)';
+      chipPrices.style.color = 'var(--bd-accent)';
+    } else {
+      chipPrices.style.cssText = ''; // Reset to default
+      chipPrices.style.display = 'inline-flex';
+    }
+    chipPrices.innerHTML = loading
+      ? `<span class="chip-spinner"></span>${escHtml(text)}`
+      : escHtml(text);
+  }
+
+  /**
+   * Trigger pulse animation on a button (once per page load)
+   * @param {'direct' | 'prices'} which
+   */
+  function pulseOnce(which) {
+    const btn = which === 'direct' ? btnOpenDirect : btnOpenPrices;
+    const pulsedFlag = which === 'direct' ? '_directPulsed' : '_comparePulsed';
+    if (!btn) return;
+
+    // Check if already pulsed
+    if (which === 'direct' && _directPulsed) return;
+    if (which === 'prices' && _comparePulsed) return;
+
+    // Check prefers-reduced-motion
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    btn.classList.add('btn-pulse');
+    setTimeout(() => btn.classList.remove('btn-pulse'), 1200);
+
+    // Mark as pulsed
+    if (which === 'direct') _directPulsed = true;
+    else _comparePulsed = true;
+  }
 
   // Apply language-aware hyphenation and size tier for hotel name
   const hotelNameEl = shadowRoot.querySelector('.hotel-name');
@@ -1106,6 +1448,37 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
       amt.textContent = priceStr;
       priceDisplay.append(amt);
     }
+  }
+
+  // ========================================
+  // RESPONSIVE BREAKPOINT OBSERVER
+  // ========================================
+  const hostWrapper = shadowRoot.querySelector('.host-wrapper');
+  const bdContainerEl = shadowRoot.querySelector('.container');
+
+  function updateResponsiveMode(width) {
+    // Note: we add classes to the container's host (the custom element)
+    // The :host() selector in CSS will match these
+    const host = container; // The outer container element
+
+    host.classList.remove('bd-compact', 'bd-ultra-compact');
+
+    if (width < 290) {
+      host.classList.add('bd-ultra-compact');
+    } else if (width < 340) {
+      host.classList.add('bd-compact');
+    }
+  }
+
+  // Observe container width changes
+  if (bdContainerEl && typeof ResizeObserver !== 'undefined') {
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        updateResponsiveMode(width);
+      }
+    });
+    resizeObserver.observe(bdContainerEl);
   }
 
   // HELPER: Scrape and parse dates with "Smart Year" logic
@@ -1726,9 +2099,13 @@ Best regards,`;
       const cacheKey = `cache_${_hotelName}`;
       const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
+      // Set direct chip to loading state
+      _directStatus = 'loading';
+      updateDirectChip({ text: 'Finding…', loading: true });
+
       // Helper to render buttons from data (Ghost Logic)
       const renderButtons = (data) => {
-        const directDealSection = shadowRoot.getElementById('direct-deal-section');
+        const directDealSection = shadowRoot.getElementById('panel-direct');
         const emailActions = shadowRoot.getElementById('email-actions');
         const dynamicContainer = shadowRoot.getElementById('dynamic-buttons');
 
@@ -1814,12 +2191,36 @@ Best regards,`;
           hasAnyData = true;
         }
 
-        // GHOST LOGIC: Only show the entire section if we have ANY data
+        // GHOST LOGIC: Track if we have direct data (but don't auto-display panel)
+        // Panel visibility is now controlled by _activePanel via setActivePanel()
+        // We just need to ensure the content EXISTS inside the panel for when user opens it
+        // No auto-display - panel stays hidden until user clicks "Book direct"
+
+        // Update direct chip based on what we found
         if (hasAnyData) {
-          directDealSection.style.display = 'block';
+          _directStatus = 'ready';
+          // Determine best chip text
+          let chipText = '';
+          const hasWebsite = !!data.website;
+          const hasEmail = !!data.found_email;
+          const hasPhone = !!data.phone;
+          const optionCount = [hasWebsite, hasEmail, hasPhone].filter(Boolean).length;
+
+          if (optionCount > 1) {
+            chipText = `${optionCount} options`;
+          } else if (hasWebsite) {
+            chipText = 'Official site';
+          } else if (hasEmail) {
+            chipText = 'Email ready';
+          } else if (hasPhone) {
+            chipText = 'Phone only';
+          }
+
+          updateDirectChip({ text: chipText, loading: false });
+          pulseOnce('direct');
         } else {
-          directDealSection.style.display = 'none';
-          Logger.debug('No contact data found - hiding Direct Deal section');
+          _directStatus = 'empty';
+          updateDirectChip({ text: '', loading: false }); // Hide chip if nothing found
         }
       };
 
@@ -1859,11 +2260,15 @@ Best regards,`;
         });
       } catch (e) {
         Logger.warn('Hotel details fetch failed:', e.message);
+        _directStatus = 'error';
+        updateDirectChip({ text: '', loading: false });
         return; // Fail silently
       }
 
       if (!data || data.error) {
         Logger.warn('Hotel details response error:', data?.error);
+        _directStatus = 'empty';
+        updateDirectChip({ text: '', loading: false });
         return; // Fail silently
       }
 
@@ -1878,6 +2283,8 @@ Best regards,`;
     } catch (e) {
       // Fail silently - don't show errors to user
       Logger.warn('Hotel details fetch failed (silent):', e.message);
+      _directStatus = 'error';
+      updateDirectChip({ text: '', loading: false }); // Hide chip on error
     }
   })();
 
@@ -1896,7 +2303,8 @@ Best regards,`;
   let _compareInFlight = false;     // Guard against rerender during fetch
   let _sanityState = null;          // { severity, reasons, message, stats } or null
   let _integrityAssessment = null;  // Output from assessComparisonIntegrity()
-  let _autoVerifyDone = false;      // Guard for auto-verify (future use)
+  let _autoVerifyDone = false;      // Guard for auto-verify on price anomaly
+  let _autoSmartRetryDone = false;  // Guard for auto-retry on uncertain match
 
   // Debounced rerender for room/price changes (avoids rapid fire during room selection)
   function scheduleCompareRerender() {
@@ -1914,8 +2322,8 @@ Best regards,`;
     }, BookDirect.Contracts.COMPARE_RERENDER_DEBOUNCE_MS);
   }
 
-  // Get DOM elements for compare section
-  const compareSection = shadowRoot.getElementById('compare-section');
+  // Get DOM elements for compare section (now inside panel-prices)
+  const compareSection = shadowRoot.getElementById('panel-prices');
   const compareLoading = shadowRoot.getElementById('compare-loading');
   const compareNoDates = shadowRoot.getElementById('compare-no-dates');
   const compareError = shadowRoot.getElementById('compare-error');
@@ -1935,6 +2343,12 @@ Best regards,`;
     // Toggle compact class on compare section if exists
     if (compareSection) {
       compareSection.classList.toggle('compact', isCompact);
+    }
+
+    // Toggle two-column CTA grid based on width
+    const ctaGrid = shadowRoot.getElementById('cta-grid');
+    if (ctaGrid) {
+      ctaGrid.classList.toggle('two-col', width >= 320);
     }
     // Hero label always shows "Booking.com (viewing)" - no switching needed
   }
@@ -2751,10 +3165,19 @@ Best regards,`;
     const matchUncertain = !!(data.match?.matchUncertain || data.matchUncertain);
     const isLowConfidence = confidence < 0.4;
 
+    // Domain confirmation: if matchedBy='officialDomain', the domain confirms the match
+    // This is strong evidence even if confidence is low or matchUncertain is set
+    // BUT: Domain confirmation only overrides uncertainty if confidence is reasonable (>= 55%)
+    // This prevents false confidence with parent company domains (e.g., Islandshotel covering
+    // both "Hotel Reykjavík Saga" and "Hotel Reykjavík Grand" under the same domain)
+    const domainConfirmed = data.match?.matchedBy === 'officialDomain';
+    const domainOverridesUncertain = domainConfirmed && confidence >= 0.55;
+
     // Hard mismatch: name-based (coverage < 0.5 or missing key tokens)
     // Soft uncertainty: low confidence or matchUncertain flag, but names are OK
+    // EXCEPTION: Domain confirmation WITH good confidence overrides soft uncertainty
     const hardMismatch = mismatchCheck.isMismatch;
-    const softUncertain = !hardMismatch && (isLowConfidence || matchUncertain);
+    const softUncertain = !hardMismatch && !domainOverridesUncertain && (isLowConfidence || matchUncertain);
 
     _currentMismatch = hardMismatch || softUncertain;
 
@@ -2768,6 +3191,8 @@ Best regards,`;
       matchedHotel: matchedHotelName,
       hardMismatch,
       softUncertain,
+      domainConfirmed,
+      domainOverridesUncertain,
       confidence,
       isLowConfidence,
       matchUncertain,
@@ -3166,6 +3591,42 @@ Best regards,`;
     compareResults.innerHTML = html;
     compareTimestamp.textContent = `Checked ${formatTimestamp(data.fetchedAt)}`;
     showCompareState('results');
+
+    // ========================================
+    // UPDATE PRICES CHIP BASED ON RESULTS
+    // ========================================
+    const uiPolicy = _integrityAssessment?.uiPolicy || {};
+    const retryMode = uiPolicy.retryMode || 'refresh';
+
+    _compareStatus = 'ready';
+
+    // Derive chip text from state
+    let pricesChipText = '';
+    let isSavings = false;
+
+    if (retryMode === 'retry_match') {
+      // Uncertain match - prompt to check
+      pricesChipText = 'Check match';
+    } else if (uiPolicy.showSelectRoomsCTA) {
+      // Need room selection
+      pricesChipText = 'Select rooms';
+    } else if (uiPolicy.confirmedSavingsDisplay) {
+      // Has confirmed savings
+      pricesChipText = `Save ${uiPolicy.confirmedSavingsDisplay}`;
+      isSavings = true;
+      pulseOnce('prices');
+    } else if (uiPolicy.potentialSavingsDisplay && uiPolicy.showPotentialSavings) {
+      // Has potential savings
+      pricesChipText = `Up to ${uiPolicy.potentialSavingsDisplay}`;
+      isSavings = true;
+      pulseOnce('prices');
+    } else {
+      // No meaningful savings
+      pricesChipText = 'Best found';
+    }
+
+    updatePricesChip({ text: pricesChipText, loading: false, isSavings });
+
     updateCompareFooter();
 
     // I9: Add click handler for "Why this match?" link
@@ -3184,9 +3645,15 @@ Best regards,`;
 
     const seq = ++_compareReqSeq; // Race-condition guard
 
-    // Show section and loading state
-    compareSection.style.display = 'block';
-    showCompareState('loading');
+    // Set prices chip to loading state
+    _compareStatus = 'loading';
+    updatePricesChip({ text: 'Checking…', loading: true });
+
+    // Only show loading state if prices panel is already open (silent prefetch otherwise)
+    if (_activePanel === 'prices') {
+      compareSection.style.display = 'block';
+      showCompareState('loading');
+    }
 
     try {
       const response = await new Promise((resolve, reject) => {
@@ -3219,6 +3686,8 @@ Best regards,`;
 
       if (response?.needsDates) {
         showCompareState('no-dates');
+        _compareStatus = 'noDates';
+        updatePricesChip({ text: 'Add dates', loading: false });
         return;
       }
 
@@ -3232,6 +3701,25 @@ Best regards,`;
           console.log('bookDirect: Retrying after 500ms (waiting for page context)');
           await new Promise(r => setTimeout(r, 500));
           return fetchCompareData(forceRefresh, { ...opts, _retried: true });
+        }
+
+        // Exponential backoff retry for page context errors (up to 3 retries)
+        // Delays: 250ms, 750ms, 1500ms
+        const retryDelays = [250, 750, 1500];
+        const retryCount = opts._retryCount || 0;
+
+        if (errorCode === C.ERR_NO_PAGE_CONTEXT && retryCount < retryDelays.length) {
+          const delay = retryDelays[retryCount];
+          console.log(`bookDirect: Retry ${retryCount + 1}/${retryDelays.length} after ${delay}ms (waiting for page context)`);
+
+          // Show intermediate message on first few retries
+          if (retryCount > 0) {
+            compareError.textContent = 'Still loading Booking details… retrying.';
+            showCompareState('error');
+          }
+
+          await new Promise(r => setTimeout(r, delay));
+          return fetchCompareData(forceRefresh, { ...opts, _retried: true, _retryCount: retryCount + 1 });
         }
 
         // User-friendly error messages based on error_code
@@ -3296,10 +3784,23 @@ Best regards,`;
         }, 700);
       }
 
+      // --- AUTO-SMART-RETRY ON UNCERTAIN MATCH ---
+      // If the first compare returns an uncertain match (soft or hard mismatch),
+      // automatically retry with smart=true to find the correct hotel
+      if (_currentMismatch && !_autoSmartRetryDone && !_compareInFlight && !opts._isSmartRetry) {
+        _autoSmartRetryDone = true;
+        console.log('bookDirect: Auto-smart-retry triggered for uncertain match');
+        setTimeout(() => {
+          fetchCompareData(true, { smart: true, reason: 'auto_smart_uncertain', _isSmartRetry: true });
+        }, 700);
+      }
+
     } catch (err) {
       console.error('bookDirect: Compare fetch error', err);
       compareError.textContent = 'Unable to check prices.';
       showCompareState('error');
+      _compareStatus = 'error';
+      updatePricesChip({ text: '', loading: false });
       updateCompareFooter();
     }
   }

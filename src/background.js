@@ -20,6 +20,7 @@ import { createTabContextStore } from './background/tabContextStore.js';
 import { createWorkerClient } from './background/workerClient.js';
 import { createMessageRouter } from './background/messageRouter.js';
 import { registerTabCleanup } from './background/cleanup.js';
+import { createEnsurePageContext } from './background/ensurePageContext.js';
 
 // --- CONFIGURATION ---
 const DEV_DEBUG = false;
@@ -69,6 +70,9 @@ const tabContextStore = createTabContextStore();
 const compareCache = createCompareCache();
 const compareTracker = createCompareTracker();
 const refreshThrottle = createRefreshThrottle();
+
+// Page context helper (self-healing recovery)
+const ensurePageContextHelper = createEnsurePageContext({ tabContextStore, log });
 
 // Worker client needs loadCtxId bound with logger
 const workerClient = createWorkerClient({
@@ -146,7 +150,8 @@ const messageHandler = createMessageRouter({
     refreshThrottle,
     workerClient,
     storeCtxId: (params, ctxId, tabId, ctxMap, logger) => storeCtxId(params, ctxId, tabId, ctxMap, logger),
-    fetchCompareDeduped
+    fetchCompareDeduped,
+    ensurePageContextHelper
 });
 
 // --- REGISTER LISTENERS ---
