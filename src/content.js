@@ -745,6 +745,82 @@
         return r.bottom > bandTop && r.top < bandBottom;
     }
 
+    // ========================================
+    // DOCKING GATE: require the room table area before allowing docking
+    // Prevents initial docking into Booking's sticky property-header sidebar on refresh.
+    // ========================================
+    let __bdDockingEnabled = false;
+    let __bdDockingJustEnabled = false;
+
+    const ROOM_TABLE_ROOT_SELECTORS = [
+        '.hprt-table',
+        '#hprt-table',
+        '.roomstable',
+
+        // Newer Booking variants (best-effort — safe if not present)
+        '[data-component="hotel/new-rooms-table"]',
+        '[data-component="hotel/new-rooms-table/reservation-cta"]',
+        '[data-testid*="rooms-table" i]',
+        '[data-testid*="room-table" i]',
+
+        // Fallback: the room quantity dropdowns live inside the room table area
+        'select[name^="hprt_nos_select"]',
+        '.hprt-nos-select'
+    ];
+
+    function findRoomTableRoot() {
+        for (const sel of ROOM_TABLE_ROOT_SELECTORS) {
+            const el = document.querySelector(sel);
+            if (!el) continue;
+
+            // If we matched a select, climb to the nearest table-ish container
+            if (el.matches && (el.matches('select') || el.matches('.hprt-nos-select'))) {
+                return (
+                    el.closest('.hprt-table') ||
+                    el.closest('#hprt-table') ||
+                    el.closest('.roomstable') ||
+                    el.closest('table') ||
+                    el.closest('[role="table"]') ||
+                    el
+                );
+            }
+
+            return el;
+        }
+        return null;
+    }
+
+    function isRoomTableInViewportBand() {
+        const root = findRoomTableRoot();
+        if (!root) return false;
+
+        const r = root.getBoundingClientRect();
+
+        // Use a slightly wider band than the button check so docking arms "as you arrive"
+        return isRectInViewportBand(r, 120, 120);
+    }
+
+    function updateDockingGate(reason) {
+        if (__bdDockingEnabled) return true;
+
+        if (isRoomTableInViewportBand()) {
+            __bdDockingEnabled = true;
+            __bdDockingJustEnabled = true;
+
+            Logger.info(`[placement] Docking enabled after room table became visible (${reason})`);
+
+            // Drop any "sticky" anchor we grabbed from the property header,
+            // so the first dock after enabling selects the real room-table button.
+            reserveButton = null;
+
+            // Clear pending state so we don't get stuck waiting for dwell timers.
+            PLACEMENT.pendingMode = null;
+            PLACEMENT.pendingSince = 0;
+        }
+
+        return __bdDockingEnabled;
+    }
+
     /**
      * Determines if an anchor element is suitable for docking
      * Returns false if element is hidden, off-screen, or has hidden ancestors
@@ -840,6 +916,31 @@
         const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
         const doAnim = animate && !prefersReduced && !PLACEMENT.animating;
 
+        // ========================================
+        // DOCKING GATE: enforce overlay until room table is visible
+        // ========================================
+        const dockingEnabled = updateDockingGate('placeUI');
+
+        // If we just enabled docking, bypass dwell/cooldown on this pass so we can snap into place.
+        const effectiveForce = force || __bdDockingJustEnabled;
+        if (__bdDockingJustEnabled) __bdDockingJustEnabled = false;
+
+        if (!dockingEnabled) {
+            const floatHost = getOrCreateFloatingHost();
+            if (uiRoot.parentNode !== floatHost) floatHost.appendChild(uiRoot);
+
+            const ghost = getOrCreateDockGhost();
+            if (ghost && ghost.isConnected) ghost.style.height = '0px';
+
+            uiRoot.style.pointerEvents = 'auto';
+            applyHostOverlay(floatHost);
+
+            PLACEMENT.mode = 'overlay';
+            PLACEMENT.pendingMode = null;
+            uiRoot.dataset.bdPlacement = 'overlay';
+            return 'overlay';
+        }
+
         // Re-find best button with stickiness
         reserveButton = findBestReserveButton(reserveButton);
 
@@ -911,7 +1012,7 @@
                 (newMode === 'overlay')
             );
 
-        if (alreadyPlaced && !force) {
+        if (alreadyPlaced && !effectiveForce) {
             // Overlay mode is self-healing: reassert position + clear clipPath
             if (newMode === 'overlay') {
                 applyHostOverlay(getOrCreateFloatingHost());
@@ -923,7 +1024,7 @@
 
         // Check cooldown (don't switch rapidly)
         const now = performance.now();
-        if (!force && PLACEMENT.mode && newMode !== PLACEMENT.mode) {
+        if (!effectiveForce && PLACEMENT.mode && newMode !== PLACEMENT.mode) {
             if (now - PLACEMENT.lastSwitchAt < SWITCH_COOLDOWN_MS) {
                 return PLACEMENT.mode;
             }
