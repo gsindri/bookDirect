@@ -1178,6 +1178,99 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
         border: 1px solid var(--bd-border-strong);
       }
+
+      /* ========================================
+         MINIMIZE/EXPAND PANEL UI (Phase 2)
+         ======================================== */
+      .header {
+        position: relative;
+      }
+
+      .header-controls {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        display: flex;
+        gap: 4px;
+      }
+
+      .header-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: rgba(0, 0, 0, 0.05);
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #6b7280;
+        transition: background 120ms ease, color 120ms ease;
+      }
+
+      .header-btn:hover {
+        background: rgba(0, 0, 0, 0.1);
+        color: #374151;
+      }
+
+      .header-btn.pinned {
+        background: var(--bd-accent-light);
+        color: var(--bd-accent);
+      }
+
+      .header-btn svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      /* Minimized panel state */
+      :host([data-bd-panel-state="minimized"]) .content {
+        display: none;
+      }
+
+      :host([data-bd-panel-state="minimized"]) .container {
+        padding: 10px 16px;
+      }
+
+      :host([data-bd-panel-state="minimized"]) .header {
+        padding-bottom: 0;
+        margin-bottom: 0;
+      }
+
+      :host([data-bd-panel-state="minimized"]) .header::after {
+        display: none;
+      }
+
+      :host([data-bd-panel-state="minimized"]) .logo {
+        font-size: 13px;
+      }
+
+      :host([data-bd-panel-state="minimized"]) .header-controls {
+        position: static;
+        margin-left: auto;
+      }
+
+      :host([data-bd-panel-state="minimized"]) .header {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      /* Minimized state transition */
+      .container {
+        transition: padding 180ms ease;
+      }
+
+      .content {
+        transition: opacity 120ms ease;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .container, .content {
+          transition: none;
+        }
+      }
     `;
 
   const html = `
@@ -1187,6 +1280,18 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
             <div class="logo">
                 <img class="logo-icon" src="${iconUrl}" alt="">
                 bookDirect
+            </div>
+            <div class="header-controls">
+              <button id="btn-pin" class="header-btn" title="Keep panel expanded">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M16 4a1 1 0 0 1 1 1v4.586l1.707 1.707a1 1 0 0 1 .293.707v2a1 1 0 0 1-1 1h-4v6l-1 2-1-2v-6H8a1 1 0 0 1-1-1v-2a1 1 0 0 1 .293-.707L9 9.586V5a1 1 0 0 1 1-1h6Z"/>
+                </svg>
+              </button>
+              <button id="btn-minimize" class="header-btn" title="Minimize panel">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                  <path fill-rule="evenodd" d="M5.25 12a.75.75 0 0 1 .75-.75h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/>
+                </svg>
+              </button>
             </div>
             </div>
             <div class="content">
@@ -1320,6 +1425,107 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   }
   if (panelPricesClose) {
     panelPricesClose.onclick = () => setActivePanel(null);
+  }
+
+  // ========================================
+  // MINIMIZE/EXPAND/PIN PANEL CONTROLS (Phase 2)
+  // ========================================
+  const btnMinimize = shadowRoot.getElementById('btn-minimize');
+  const btnPin = shadowRoot.getElementById('btn-pin');
+  let _panelState = 'expanded'; // 'expanded' | 'minimized' | 'pinned'
+  let _controllerPanelStateCallback = null; // Callback to notify controller
+
+  function updatePanelStateUI() {
+    // Update host attribute for CSS
+    container.dataset.bdPanelState = _panelState === 'pinned' ? 'expanded' : _panelState;
+
+    // Update pin button visual
+    if (btnPin) {
+      btnPin.classList.toggle('pinned', _panelState === 'pinned');
+      btnPin.title = _panelState === 'pinned' ? 'Unpin panel' : 'Pin panel (stay expanded)';
+    }
+
+    // Update minimize button icon based on state
+    if (btnMinimize) {
+      if (_panelState === 'minimized') {
+        btnMinimize.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" d="M11.47 7.72a.75.75 0 0 1 1.06 0l7.5 7.5a.75.75 0 1 1-1.06 1.06L12 9.31l-6.97 6.97a.75.75 0 0 1-1.06-1.06l7.5-7.5Z" clip-rule="evenodd"/>
+          </svg>`;
+        btnMinimize.title = 'Expand panel';
+      } else {
+        btnMinimize.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.25 12a.75.75 0 0 1 .75-.75h12a.75.75 0 0 1 0 1.5H6a.75.75 0 0 1-.75-.75Z" clip-rule="evenodd"/>
+          </svg>`;
+        btnMinimize.title = 'Minimize panel';
+      }
+    }
+  }
+
+  function setPanelState(newState, fromController = false) {
+    if (!['expanded', 'minimized', 'pinned'].includes(newState)) return;
+    _panelState = newState;
+    updatePanelStateUI();
+
+    // Notify controller if state changed from UI
+    if (!fromController && _controllerPanelStateCallback) {
+      _controllerPanelStateCallback(newState);
+    }
+    console.log('[bookDirect][panel] State changed to:', newState);
+  }
+
+  // Minimize button toggles between minimized ↔ expanded
+  if (btnMinimize) {
+    btnMinimize.onclick = () => {
+      if (_panelState === 'minimized') {
+        setPanelState('expanded');
+      } else if (_panelState === 'expanded') {
+        setPanelState('minimized');
+      }
+      // If pinned, minimize button unpins and minimizes
+      else if (_panelState === 'pinned') {
+        setPanelState('minimized');
+      }
+    };
+  }
+
+  // Pin button toggles pinned state
+  if (btnPin) {
+    btnPin.onclick = () => {
+      if (_panelState === 'pinned') {
+        setPanelState('expanded');
+      } else {
+        setPanelState('pinned');
+      }
+    };
+  }
+
+  /**
+   * Called by controller to programmatically minimize panel
+   * (e.g., when inline appears and panel should auto-minimize)
+   */
+  function minimizeIfNotPinned() {
+    if (_panelState !== 'pinned') {
+      setPanelState('minimized', true);
+    }
+  }
+
+  /**
+   * Called by controller to programmatically expand panel
+   * (e.g., when inline hides and panel should restore)
+   */
+  function expandIfMinimized() {
+    if (_panelState === 'minimized') {
+      setPanelState('expanded', true);
+    }
+  }
+
+  /**
+   * Register a callback to notify controller of panel state changes
+   */
+  function setPanelStateCallback(cb) {
+    _controllerPanelStateCallback = typeof cb === 'function' ? cb : null;
   }
 
   // ========================================
@@ -3051,8 +3257,17 @@ Best regards,`;
   }
 
   // --- MISMATCH DETECTION HELPERS ---
+  // Strip diacritics/accents from a string (mirrors Worker's approach)
+  // Converts "Hótel" → "Hotel", "Valaskjálf" → "Valaskjalf", etc.
+  function stripDiacritics(s) {
+    return String(s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
   function normalizeNameForComparison(s) {
-    return String(s || '').toLowerCase()
+    return stripDiacritics(s)
+      .toLowerCase()
       .replace(/[^a-z0-9]+/g, ' ')
       .replace(/\b(hotel|resort|inn|suites?|apartments?)\b/gi, '')
       .trim();
@@ -3971,5 +4186,438 @@ Best regards,`;
     container.updatePrice(priceObj.rawText);
   };
 
+  // ========================================
+  // PANEL STATE METHODS (exposed for controller)
+  // ========================================
+  container.minimizeIfNotPinned = minimizeIfNotPinned;
+  container.expandIfMinimized = expandIfMinimized;
+  container.setPanelStateCallback = setPanelStateCallback;
+  container.getPanelState = () => _panelState;
+  container.setPanelState = (s) => setPanelState(s, true);
+
   return container;
+};
+
+// ========================================
+// NEW TWO-SURFACE UI CONTROLLER (Phase 1 Architecture)
+// ========================================
+// Returns a controller object with:
+// - panelEl: Primary panel (detailed info, always available)
+// - inlineEl: Inline micro-card (CTA-focused, appears when rooms table visible)
+// - Shared state + update methods so both surfaces stay in sync
+// ========================================
+
+window.BookDirect.createUIController = function (options = {}) {
+  const {
+    hotelName = 'Hotel',
+    initialPrice = '',
+    isHotelPage = true
+  } = options;
+
+  // ========================================
+  // SHARED STATE (both surfaces render from this)
+  // ========================================
+  const state = {
+    hotelName,
+    viewingPrice: initialPrice,
+    priceState: 'unknown',  // selected_total | sidebar_total | from_price | unknown
+    priceNumber: null,
+    priceTaxState: 'unknown',
+    selectedRooms: [],
+    offers: null,           // Compare API response data
+    compareStatus: 'idle',  // idle | loading | ready | noDates | error
+    directStatus: 'idle',   // idle | loading | ready | empty | error
+    bestOffer: null,        // Cached best offer for quick access
+    panelState: 'expanded', // expanded | minimized | pinned
+    inlineVisible: false,   // Controlled by IntersectionObserver
+    discoveryTriggered: false, // Prevents re-triggering discovery animation
+  };
+
+  // ========================================
+  // CREATE PRIMARY PANEL (reuses existing createUI)
+  // ========================================
+  const panelEl = window.BookDirect.createUI(hotelName, initialPrice, true);
+  panelEl.id = 'bd-panel-el';
+  panelEl.dataset.bdSurface = 'panel';
+
+  // ========================================
+  // CREATE INLINE MICRO-CARD (minimal stub for Phase 1)
+  // ========================================
+  const inlineEl = document.createElement('div');
+  inlineEl.id = 'bd-inline-el';
+  inlineEl.dataset.bdSurface = 'inline';
+  inlineEl.style.cssText = `
+    visibility: visible !important;
+    opacity: 1 !important;
+    display: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  `;
+
+  const inlineShadow = inlineEl.attachShadow({ mode: 'closed' });
+
+  // Minimal inline micro-card styles
+  const inlineStyles = document.createElement('style');
+  inlineStyles.textContent = `
+    :host {
+      display: block;
+      visibility: visible !important;
+      opacity: 1 !important;
+    }
+
+    .inline-card {
+      background: #ffffff;
+      border: 2px solid #6366f1;
+      border-radius: 10px;
+      padding: 12px 14px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      font-family: inherit;
+      min-width: 200px;
+      max-width: 280px;
+    }
+
+    .inline-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #6366f1;
+      margin-bottom: 6px;
+    }
+
+    .inline-savings {
+      font-size: 14px;
+      font-weight: 700;
+      color: #059669;
+      margin-bottom: 10px;
+    }
+
+    .inline-savings.no-savings {
+      color: #6b7280;
+    }
+
+    .inline-cta {
+      display: block;
+      width: 100%;
+      padding: 10px 14px;
+      background: #6366f1;
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background 140ms ease, transform 140ms ease;
+    }
+
+    .inline-cta:hover {
+      background: #4f46e5;
+      transform: translateY(-1px);
+    }
+
+    .inline-cta:active {
+      transform: translateY(0);
+    }
+
+    .inline-details {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #6b7280;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .inline-details:hover {
+      color: #6366f1;
+      text-decoration: underline;
+    }
+
+    /* Loading state */
+    .inline-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #6b7280;
+      font-size: 12px;
+    }
+
+    .inline-spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(99, 102, 241, 0.2);
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Pulse animation for discovery */
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+      70% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+    }
+
+    .inline-card.pulse {
+      animation: pulse 1.5s ease-out;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .inline-card.pulse { animation: none; }
+      .inline-cta { transition: none; }
+      .inline-cta:hover { transform: none; }
+    }
+  `;
+
+  // Initial inline HTML
+  const inlineContent = document.createElement('div');
+  inlineContent.className = 'inline-card';
+  inlineContent.innerHTML = `
+    <div class="inline-title">Better deal on direct site</div>
+    <div class="inline-savings">Checking prices…</div>
+    <a class="inline-cta" href="#" target="_blank" rel="noopener noreferrer">Visit direct website</a>
+    <div class="inline-details" data-action="show-panel">See details</div>
+  `;
+
+  inlineShadow.appendChild(inlineStyles);
+  inlineShadow.appendChild(inlineContent);
+
+  // Get inline elements for updates
+  const inlineCard = inlineContent;
+  const inlineSavingsEl = inlineContent.querySelector('.inline-savings');
+  const inlineCtaEl = inlineContent.querySelector('.inline-cta');
+
+  // ========================================
+  // CONTROLLER METHODS (shared updates)
+  // ========================================
+
+  function renderInline() {
+    if (!state.inlineVisible) {
+      inlineEl.style.display = 'none';
+      return;
+    }
+    inlineEl.style.display = 'block';
+
+    if (state.compareStatus === 'loading') {
+      inlineSavingsEl.innerHTML = `
+        <span class="inline-loading">
+          <span class="inline-spinner"></span>
+          Checking prices…
+        </span>
+      `;
+      return;
+    }
+
+    if (!state.offers || !state.bestOffer) {
+      inlineSavingsEl.textContent = 'No offers found';
+      inlineSavingsEl.classList.add('no-savings');
+      return;
+    }
+
+    const best = state.bestOffer;
+    inlineSavingsEl.classList.remove('no-savings');
+
+    if (best.savings && best.savings > 0) {
+      const savingsText = best.savingsDisplay || `Save ${best.savings.toFixed(0)}`;
+      inlineSavingsEl.textContent = savingsText;
+    } else {
+      inlineSavingsEl.textContent = 'Similar price';
+      inlineSavingsEl.classList.add('no-savings');
+    }
+
+    // Update CTA link
+    if (best.link) {
+      inlineCtaEl.href = best.link;
+    }
+  }
+
+  const controller = {
+    // DOM elements
+    panelEl,
+    inlineEl,
+
+    // Access to shared state (for debugging)
+    get state() { return { ...state }; },
+
+    // ----------------------------------------
+    // UPDATE METHODS (mutate state, re-render both surfaces)
+    // ----------------------------------------
+
+    updateViewingPrice(priceObj) {
+      if (!priceObj || typeof priceObj !== 'object') return;
+
+      state.viewingPrice = priceObj.rawText || state.viewingPrice;
+      state.priceState = priceObj.state || 'unknown';
+      state.priceNumber = Number.isFinite(priceObj.totalNumber) ? priceObj.totalNumber : null;
+      state.priceTaxState = priceObj.taxState || 'unknown';
+
+      // Delegate to panel's existing method
+      if (panelEl.updateViewingPrice) {
+        panelEl.updateViewingPrice(priceObj);
+      }
+      // Inline doesn't show viewing price, but could re-render savings
+      renderInline();
+    },
+
+    updateSelectedRooms(rooms) {
+      state.selectedRooms = Array.isArray(rooms) ? rooms : [];
+      if (panelEl.updateSelectedRooms) {
+        panelEl.updateSelectedRooms(rooms);
+      }
+      renderInline();
+    },
+
+    updateOffers(data) {
+      state.offers = data;
+      state.compareStatus = data ? 'ready' : 'idle';
+
+      // Compute best offer
+      if (data?.result?.offers && data.result.offers.length > 0) {
+        // Find cheapest offer
+        state.bestOffer = data.result.offers.reduce((best, offer) => {
+          if (!best) return offer;
+          const bestPrice = best.total || best.price || Infinity;
+          const offerPrice = offer.total || offer.price || Infinity;
+          return offerPrice < bestPrice ? offer : best;
+        }, null);
+
+        // Calculate savings if we have viewing price
+        if (state.bestOffer && state.priceNumber) {
+          const offerPrice = state.bestOffer.total || state.bestOffer.price;
+          if (offerPrice && offerPrice < state.priceNumber) {
+            state.bestOffer.savings = state.priceNumber - offerPrice;
+            state.bestOffer.savingsPercent = Math.round((state.bestOffer.savings / state.priceNumber) * 100);
+            state.bestOffer.savingsDisplay = `Save ${state.bestOffer.savingsPercent}%`;
+          }
+        }
+      } else {
+        state.bestOffer = null;
+      }
+
+      // Update panel via existing method
+      if (panelEl.updateCompareData) {
+        panelEl.updateCompareData(data);
+      }
+      renderInline();
+
+      // Trigger discovery animation if meaningful savings found
+      this.checkDiscoveryTrigger();
+    },
+
+    setDiscoveryState(triggered) {
+      state.discoveryTriggered = triggered;
+    },
+
+    checkDiscoveryTrigger() {
+      if (state.discoveryTriggered) return;
+      if (!state.bestOffer || !state.bestOffer.savings) return;
+
+      // Threshold: 5% savings OR equivalent of ~$10
+      const SAVINGS_PERCENT_THRESHOLD = 5;
+      const percent = state.bestOffer.savingsPercent || 0;
+
+      if (percent >= SAVINGS_PERCENT_THRESHOLD) {
+        state.discoveryTriggered = true;
+
+        // Trigger pulse animation on inline card
+        if (state.inlineVisible && inlineCard) {
+          const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+          if (!prefersReduced) {
+            inlineCard.classList.add('pulse');
+            setTimeout(() => inlineCard.classList.remove('pulse'), 1500);
+          }
+        }
+
+        // Notify panel to highlight best offer (Phase 3 will add more here)
+        console.log('[bookDirect] Discovery triggered: meaningful savings found');
+      }
+    },
+
+    // ----------------------------------------
+    // VISIBILITY CONTROL (called by placers)
+    // ----------------------------------------
+
+    showInline() {
+      state.inlineVisible = true;
+      renderInline();
+      // Auto-minimize panel when inline appears (unless pinned)
+      if (panelEl.minimizeIfNotPinned) {
+        panelEl.minimizeIfNotPinned();
+        state.panelState = panelEl.getPanelState?.() || 'minimized';
+      }
+    },
+
+    hideInline() {
+      state.inlineVisible = false;
+      inlineEl.style.display = 'none';
+      // Restore panel when inline hides
+      if (panelEl.expandIfMinimized) {
+        panelEl.expandIfMinimized();
+        state.panelState = panelEl.getPanelState?.() || 'expanded';
+      }
+    },
+
+    setPanelState(newState) {
+      if (['expanded', 'minimized', 'pinned'].includes(newState)) {
+        state.panelState = newState;
+      }
+    },
+
+    // ----------------------------------------
+    // PASSTHROUGH METHODS (delegate to panel)
+    // ----------------------------------------
+
+    updatePrice(price) {
+      state.viewingPrice = price;
+      if (panelEl.updatePrice) panelEl.updatePrice(price);
+    },
+
+    updateDetails(details) {
+      if (panelEl.updateDetails) panelEl.updateDetails(details);
+    },
+
+    updateCompareData(data) {
+      this.updateOffers(data);
+    },
+
+    updateHotelInfo(info) {
+      if (panelEl.updateHotelInfo) panelEl.updateHotelInfo(info);
+      if (info?.urlToBook) {
+        inlineCtaEl.href = info.urlToBook;
+      }
+    },
+
+    // ----------------------------------------
+    // LIFECYCLE
+    // ----------------------------------------
+
+    destroy() {
+      // Remove DOM elements
+      if (panelEl.isConnected) panelEl.remove();
+      if (inlineEl.isConnected) inlineEl.remove();
+
+      // Clear state
+      state.offers = null;
+      state.bestOffer = null;
+      state.discoveryTriggered = false;
+
+      console.log('[bookDirect] UIController destroyed');
+    }
+  };
+
+  // Wire up "See details" click to expand panel
+  const detailsLink = inlineShadow.querySelector('[data-action="show-panel"]');
+  if (detailsLink) {
+    detailsLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      controller.setPanelState('pinned');
+      // TODO: Phase 2 will scroll to panel or expand it
+    });
+  }
+
+  return controller;
 };
