@@ -1781,44 +1781,9 @@
         // DEBUG: Visualize the Scope
         // scope.style.border = '2px dashed blue'; // REMOVED FOR PRODUCTION
 
-        // Try to find hotel name from selectors, with fallbacks
-        let nameEl = findElement(SELECTORS.details.hotelName);
-        let hotelName = null;
-
-        if (nameEl) {
-            hotelName = cleanHotelName(nameEl.innerText);
-        }
-
-        // Fallback 1: Find the first visible H2 on the page (often the hotel name)
-        if (!hotelName) {
-            const h2s = document.querySelectorAll('h2');
-            for (const h2 of h2s) {
-                if (h2.innerText && h2.innerText.trim().length > 3 && isVisible(h2)) {
-                    const text = h2.innerText.trim();
-                    // Skip if it looks like a section header (very short or generic)
-                    if (text.length < 50 && !text.toLowerCase().includes('reserve') &&
-                        !text.toLowerCase().includes('select') && !text.toLowerCase().includes('choose')) {
-                        hotelName = cleanHotelName(text);
-                        console.log('[bookDirect] Found hotel name from H2 fallback:', hotelName);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Fallback 2: Extract from URL path (e.g., /hotel/us/walker-tribeca.html -> Walker Tribeca)
-        if (!hotelName) {
-            const pathMatch = window.location.pathname.match(/\/hotel\/[a-z]{2}\/([^/.]+)/i);
-            if (pathMatch) {
-                // Convert slug to title case: "walker-tribeca" -> "Walker Tribeca"
-                hotelName = pathMatch[1]
-                    .replace(/-/g, ' ')
-                    .replace(/\b\w/g, c => c.toUpperCase());
-                console.log('[bookDirect] Extracted hotel name from URL:', hotelName);
-            }
-        }
-
-        hotelName = hotelName || 'Hotel';
+        // Use robust hotel name extraction (JSON-LD → meta → selectors → URL)
+        // IMPORTANT: Never uses generic H2 fallback which can match section headings like "Availability"
+        const hotelName = getHotelNameRobust() || 'Hotel';
 
         // --- BOOKING VIEWING PRICE RESOLVER ---
         // Multi-pass resolver returning structured price state
