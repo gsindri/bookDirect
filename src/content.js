@@ -1314,6 +1314,140 @@
         return name || null;
     }
 
+    // ========================================
+    // ROBUST HOTEL NAME EXTRACTION
+    // Priority: JSON-LD > meta tags > selectors > URL slug
+    // Prevents section headings like "Availability" from being extracted
+    // ========================================
+
+    // Section headings that should never be used as hotel names
+    const BAD_HEADINGS = new Set([
+        "availability", "availability and prices", "select your room",
+        "reviews", "facilities", "house rules", "location", "about",
+        "description", "photos", "prices", "rooms", "amenities",
+        "overview", "info", "property info", "guest reviews",
+        "fine print", "the fine print", "policies", "highlights"
+    ]);
+
+    /**
+     * Check if a name looks like a section heading rather than a hotel name
+     */
+    function looksLikeSectionHeading(name) {
+        const t = String(name || "").toLowerCase().trim();
+        if (!t) return true;
+        if (BAD_HEADINGS.has(t)) return true;
+        // Avoid super-generic one-word headings (e.g., "Location", "Reviews")
+        if (t.length <= 12 && !t.includes(" ")) return true;
+        return false;
+    }
+
+    /**
+     * Extract hotel name from JSON-LD structured data (most reliable)
+     */
+    function extractHotelNameFromJsonLd() {
+        const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+        for (const s of scripts) {
+            try {
+                const json = JSON.parse(s.textContent);
+                const nodes = Array.isArray(json) ? json : [json];
+                for (const node of nodes) {
+                    const type = node?.["@type"];
+                    const types = Array.isArray(type) ? type : [type];
+                    const isHotelish = types.some(t =>
+                        String(t).toLowerCase().includes("hotel") ||
+                        String(t).toLowerCase().includes("lodging") ||
+                        String(t).toLowerCase().includes("accommodation")
+                    );
+                    if (!isHotelish) continue;
+
+                    const name = cleanHotelName(node?.name);
+                    if (name && !looksLikeSectionHeading(name)) {
+                        Logger.debug('[extraction] Hotel name from JSON-LD:', name);
+                        return name;
+                    }
+                }
+            } catch (_) { }
+        }
+        return null;
+    }
+
+    /**
+     * Extract hotel name from meta tags (og:title, twitter:title, document title)
+     */
+    function extractHotelNameFromMeta() {
+        const raw =
+            document.querySelector('meta[property="og:title"]')?.content ||
+            document.querySelector('meta[name="twitter:title"]')?.content ||
+            document.title ||
+            "";
+
+        if (!raw) return null;
+
+        // Remove Booking.com suffix (various formats)
+        let name = raw.replace(/\s*[-|–—:]\s*(Booking\.com|booking\.com).*$/i, "").trim();
+
+        // Booking titles often include location: "Hotel Lotus, Reykjavík – Updated 2026 Prices"
+        // Extract just the hotel name part (before comma or dash with year)
+        name = name.replace(/\s*[-–—]\s*(Updated\s+)?\d{4}\s*(Prices)?.*$/i, "").trim();
+        if (name.includes(",")) {
+            name = name.split(",")[0].trim();
+        }
+
+        name = cleanHotelName(name);
+        if (name && !looksLikeSectionHeading(name)) {
+            Logger.debug('[extraction] Hotel name from meta:', name);
+            return name;
+        }
+        return null;
+    }
+
+    /**
+     * Extract hotel name from DOM selectors (with validation)
+     */
+    function extractHotelNameFromSelectors() {
+        for (const sel of SELECTORS.details.hotelName) {
+            const el = document.querySelector(sel);
+            if (!el) continue;
+
+            const name = cleanHotelName(el.innerText || el.textContent);
+            if (name && !looksLikeSectionHeading(name)) {
+                Logger.debug('[extraction] Hotel name from selector:', sel, '->', name);
+                return name;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extract hotel name from URL slug (last resort, but stable)
+     */
+    function extractHotelNameFromUrl() {
+        const urlMatch = window.location.pathname.match(/\/hotel\/[a-z]{2}\/([^/.]+)/i);
+        if (urlMatch) {
+            const slug = urlMatch[1];
+            // Convert "hotel-lotus-reykjavik" to "Hotel Lotus Reykjavik"
+            const name = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            Logger.debug('[extraction] Hotel name from URL:', name);
+            return name;
+        }
+        return null;
+    }
+
+    /**
+     * Get hotel name using robust extraction with fallback chain
+     * Priority: JSON-LD > meta tags > selectors > URL slug
+     * Never falls back to generic H2 elements
+     */
+    function getHotelNameRobust() {
+        return (
+            extractHotelNameFromJsonLd() ||
+            extractHotelNameFromMeta() ||
+            extractHotelNameFromSelectors() ||
+            extractHotelNameFromUrl() ||
+            null
+        );
+    }
+
     // --- ITINERARY EXTRACTION ---
     // Extracts stay parameters from Booking.com URL and DOM for /compare API
     function extractItinerary() {
@@ -1486,36 +1620,9 @@
             if (numMatch) currentOtaPriceTotal = numMatch;
         }
 
-        // 6. Get hotel name (clean badges/certifications) with fallbacks
-        let nameEl = findElement(SELECTORS.details.hotelName);
-        let hotelName = null;
-
-        if (nameEl) {
-            hotelName = cleanHotelName(nameEl.innerText);
-        }
-
-        // Fallback 1: Find visible H2 elements
-        if (!hotelName) {
-            const h2s = document.querySelectorAll('h2');
-            for (const h2 of h2s) {
-                if (h2.innerText && h2.innerText.trim().length > 3 && isVisible(h2)) {
-                    const text = h2.innerText.trim();
-                    if (text.length < 50 && !text.toLowerCase().includes('reserve') &&
-                        !text.toLowerCase().includes('select')) {
-                        hotelName = cleanHotelName(text);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Fallback 2: Extract from URL
-        if (!hotelName) {
-            const urlMatch = window.location.pathname.match(/\/hotel\/[a-z]{2}\/([^/.]+)/i);
-            if (urlMatch) {
-                hotelName = urlMatch[1].replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            }
-        }
+        // 6. Get hotel name using robust extraction (JSON-LD → meta → selectors → URL)
+        // IMPORTANT: Never uses generic H2 fallback which can match section headings like "Availability"
+        const hotelName = getHotelNameRobust();
 
         // 7. Current host
         const currentHost = window.location.hostname;
