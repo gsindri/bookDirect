@@ -56,16 +56,30 @@
         host: null,            // bd-panel-host element
         ghost: null,           // bd-panel-ghost element
         railSlot: null,        // bd-panel-rail-slot element
+        hasShown: false,       // Initial stability gate
+        // Mode switching hysteresis (prevents teleportation)
+        pendingMode: null,     // Mode we want to switch to
+        pendingSince: 0,       // When pending mode first appeared
+        lastSwitchAt: 0,       // Last time we committed a mode switch
     };
 
     const INLINE_STATE = {
-        mode: 'hidden',        // 'hidden' | 'button'
-        enabled: false,        // Set by IntersectionObserver
+        mode: 'hidden',        // 'hidden' | 'docked' (simplified from 'button')
         host: null,            // bd-inline-host element
         ghost: null,           // bd-inline-ghost element
-        dockSlot: null,        // bd-inline-dock-slot element
-        anchorBtn: null,       // Current inline anchor button
+        slot: null,            // bd-inline-slot element (renamed from dockSlot)
+        scope: null,           // CTA container scope (for slot reuse)
+        anchorBtn: null,       // Current inline anchor button (sticky)
+        hasShown: false,       // Initial-only stability gate flag
+        stableFrames: 0,       // Stability counter (frames with no movement)
+        lastRect: null,        // Last ghost rect for stability check
     };
+
+    // Inline-specific observers (separate from main card system)
+    let inlineHydrationObserver = null;
+    let inlineResizeObserver = null;
+    let inlinePlacementTimer = null;
+    let inlineDockSyncRAF = false;
 
     // NEW DOM IDs for two-placer system
     const PANEL_HOST_ID = 'bd-panel-host';
@@ -73,7 +87,7 @@
     const PANEL_RAIL_SLOT_ID = 'bd-panel-rail-slot';
     const INLINE_HOST_ID = 'bd-inline-host';
     const INLINE_GHOST_ID = 'bd-inline-ghost';
-    const INLINE_DOCK_SLOT_ID = 'bd-inline-dock-slot';
+    const INLINE_SLOT_ID = 'bd-inline-slot';  // Renamed from INLINE_DOCK_SLOT_ID
 
     const SWITCH_DWELL_MS = 120;       // require desired mode to persist (snappier)
     const SWITCH_COOLDOWN_MS = 350;    // minimum time between commits (snappier)
@@ -265,24 +279,45 @@
             Logger.debug('[destroyUI] Removed inline ghost');
         }
 
-        const inlineDockSlot = document.getElementById(INLINE_DOCK_SLOT_ID);
-        if (inlineDockSlot) {
-            inlineDockSlot.remove();
-            Logger.debug('[destroyUI] Removed inline dock slot');
+        const inlineSlot = document.getElementById(INLINE_SLOT_ID);
+        if (inlineSlot) {
+            inlineSlot.remove();
+            Logger.debug('[destroyUI] Removed inline slot');
         }
+
+        // Disconnect inline-specific observers
+        if (inlineHydrationObserver) {
+            inlineHydrationObserver.disconnect();
+            inlineHydrationObserver = null;
+            Logger.debug('[destroyUI] Disconnected inline hydration observer');
+        }
+        if (inlineResizeObserver) {
+            inlineResizeObserver.disconnect();
+            inlineResizeObserver = null;
+            Logger.debug('[destroyUI] Disconnected inline resize observer');
+        }
+        clearTimeout(inlinePlacementTimer);
+        inlineDockSyncRAF = false;
 
         // Reset two-placer state
         PANEL_STATE.mode = 'overlay';
         PANEL_STATE.host = null;
         PANEL_STATE.ghost = null;
         PANEL_STATE.railSlot = null;
+        PANEL_STATE.hasShown = false;
+        PANEL_STATE.pendingMode = null;
+        PANEL_STATE.pendingSince = 0;
+        PANEL_STATE.lastSwitchAt = 0;
 
         INLINE_STATE.mode = 'hidden';
-        INLINE_STATE.enabled = false;
         INLINE_STATE.host = null;
         INLINE_STATE.ghost = null;
-        INLINE_STATE.dockSlot = null;
+        INLINE_STATE.slot = null;
+        INLINE_STATE.scope = null;
         INLINE_STATE.anchorBtn = null;
+        INLINE_STATE.hasShown = false;
+        INLINE_STATE.stableFrames = 0;
+        INLINE_STATE.lastRect = null;
 
         // 4) Destroy UI controller if present
         if (uiController) {
@@ -1242,37 +1277,8 @@
     // NEW: TWO-PLACER SYSTEM (Phase 1)
     // ========================================
 
-    /**
-     * Find the room table root element (for IntersectionObserver and anchor selection)
-     * This is the main availability/room selection table on Booking.com hotel pages.
-     */
-    function findRoomTableRoot() {
-        // Try common selectors for the room availability table
-        const candidates = [
-            document.querySelector('.hprt-table'),
-            document.querySelector('#hprt-table'),
-            document.querySelector('[data-block-id]')?.closest('table'),
-            document.querySelector('.roomstable'),
-            document.querySelector('[class*="AvailableRoom"]'),
-            document.querySelector('[data-testid="rooms-table"]'),
-            // Fallback: find table containing reserve buttons
-            document.querySelector('button[data-stid="submit-hotel-reserve"]')?.closest('table'),
-            document.querySelector('button.reserve-button')?.closest('table'),
-            document.querySelector('button.js-reservation-button')?.closest('table'),
-            // Last resort: any large table in main content
-            document.querySelector('main table'),
-        ];
-
-        for (const el of candidates) {
-            if (el && el.isConnected) {
-                Logger.debug('[findRoomTableRoot] Found:', el.className || el.id || el.tagName);
-                return el;
-            }
-        }
-
-        Logger.debug('[findRoomTableRoot] No room table found');
-        return null;
-    }
+    // NOTE: findRoomTableRoot() is already defined above at line ~893
+    // using ROOM_TABLE_ROOT_SELECTORS. Don't duplicate it here.
 
     /**
      * Get all reserve/booking buttons on the page
@@ -1334,6 +1340,7 @@
             z-index: 2147483647;
             pointer-events: auto;
             box-sizing: border-box;
+            opacity: 0;
         `;
         document.documentElement.appendChild(host);
         PANEL_STATE.host = host;
@@ -1402,22 +1409,55 @@
 
     /**
      * Apply overlay positioning to panel host
-     * Upper-middle-right position: near the reviews/price cluster (decision zone)
-     * When minimized, use applyPanelHostMinimized for bottom-right "escape hatch"
+     * Upper-middle-right position with CONTINUOUS adaptive top offset:
+     * - Panel follows the header bottom as it scrolls away
+     * - Minimum offset: 24px from viewport top
+     * - NO CSS transition - updates every frame for fluid motion
      */
     function applyPanelHostOverlay(host) {
         if (!host) return;
+
+        // Detect Booking header (multiple possible selectors)
+        const bookingHeader = document.querySelector('[data-testid="header-wrapper"]') ||
+            document.querySelector('.bui-header') ||
+            document.querySelector('#b2indexPage header') ||
+            document.querySelector('header[data-component="header"]');
+
+        // Calculate adaptive top offset - CONTINUOUS tracking
+        const MIN_OFFSET = 24;  // Never glued to top edge
+        const HEADER_PADDING = 16;  // Gap below header
+
+        let topOffset;
+
+        if (bookingHeader) {
+            const headerRect = bookingHeader.getBoundingClientRect();
+            // Follow header bottom directly (stays 16px below header)
+            topOffset = Math.max(MIN_OFFSET, headerRect.bottom + HEADER_PADDING);
+        } else {
+            // Fallback: estimate based on scroll position
+            // Assume header is ~64px fixed height, page header area is ~140px
+            const scrollY = window.scrollY || window.pageYOffset;
+            const estimatedHeaderBottom = Math.max(0, 140 - scrollY);
+            topOffset = Math.max(MIN_OFFSET, estimatedHeaderBottom + HEADER_PADDING);
+        }
+
+        // Cap at reasonable maximum
+        topOffset = Math.min(topOffset, 200);
+
         host.style.position = 'fixed';
         host.style.right = '16px';
-        host.style.top = '160px';  // Below Booking header + reviews cluster
+        host.style.top = `${Math.round(topOffset)}px`;
         host.style.left = 'auto';
         host.style.bottom = 'auto';
         host.style.width = '320px';
         host.style.maxWidth = 'calc(100vw - 32px)';
-        host.style.maxHeight = 'calc(100vh - 200px)';  // Leave room at bottom
+        host.style.maxHeight = `calc(100vh - ${Math.round(topOffset) + 40}px)`;
         host.style.overflow = 'auto';
         host.style.zIndex = '2147483647';
         host.style.clipPath = 'none';
+
+        // NO transition - we update every scroll frame for fluid motion
+        host.style.transition = 'opacity 150ms ease-out';
     }
 
     /**
@@ -1464,49 +1504,34 @@
     }
 
     /**
-     * PanelPlacer: Places the primary panel (rail ↔ overlay only, never button-docked)
+     * PanelPlacer: Places the primary panel as a permanent adaptive overlay
+     * SIMPLIFIED: No more rail mode - 100% floating overlay at all times
+     * - Eliminates teleportation by never switching modes
+     * - Uses adaptive top offset to follow header
      */
     function placePanelUI(panelEl) {
         if (!panelEl) return;
 
         const host = getOrCreatePanelHost();
-        const ghost = getOrCreatePanelGhost();
-        const rail = findRightRail();
-        const railSlot = rail ? getOrCreatePanelRailSlot(rail) : null;
 
         // Ensure panel is in host
         if (panelEl.parentNode !== host) host.appendChild(panelEl);
 
-        // Determine mode: prefer rail if visible, else overlay
-        let newMode = 'overlay';
-        if (railSlot && isUsableRail(rail)) {
-            const railRect = railSlot.getBoundingClientRect();
-            if (isRectInViewportBand(railRect)) {
-                newMode = 'rail';
-            }
+        // Always overlay mode - no rail switching
+        applyPanelHostOverlay(host);
+
+        PANEL_STATE.mode = 'overlay';
+        panelEl.dataset.bdPlacement = 'overlay';
+
+        // Initial stability gate: fade in on first show
+        if (!PANEL_STATE.hasShown) {
+            host.style.opacity = '1';
+            host.style.transition = 'opacity 150ms ease-out';
+            PANEL_STATE.hasShown = true;
+            Logger.debug('[panelPlacer] Panel shown for first time');
         }
 
-        if (newMode === 'rail') {
-            // Put ghost in rail slot
-            if (ghost.parentNode !== railSlot) railSlot.appendChild(ghost);
-
-            // Sync ghost height
-            const panelRect = panelEl.getBoundingClientRect();
-            ghost.style.height = `${Math.max(0, Math.round(panelRect.height))}px`;
-
-            // Position host over ghost
-            applyPanelHostRail(host, ghost);
-        } else {
-            // Collapse ghost
-            ghost.style.height = '0px';
-            applyPanelHostOverlay(host);
-        }
-
-        PANEL_STATE.mode = newMode;
-        panelEl.dataset.bdPlacement = newMode;
-
-        Logger.debug(`[panelPlacer] Mode: ${newMode}`);
-        return newMode;
+        return 'overlay';
     }
 
     /**
@@ -1557,61 +1582,179 @@
 
     /**
      * Find the best room-table-local reserve button for inline docking
-     * CRITICAL: Must be inside room table root, reject sticky/fixed containers
+     * STRICT: Must have .hprt-* ancestor (room table structure), reject sticky/fixed containers
+     * STICKY: Keep current anchor if still valid (prevents jumping)
      */
     function findInlineAnchorButton() {
         const roomTableRoot = findRoomTableRoot();
-        const buttons = getAllReserveButtons();
-        let best = null;
-        let bestScore = -Infinity;
 
-        Logger.debug(`[findInlineAnchorButton] Found ${buttons.length} buttons, roomTableRoot: ${roomTableRoot ? 'yes' : 'no'}`);
+        // HARD REQUIREMENT: No room table = no inline card
+        if (!roomTableRoot) {
+            console.log('[bookDirect][findInlineAnchorButton] No room table root - inline hidden');
+            return null;
+        }
+
+        console.log('[bookDirect][findInlineAnchorButton] Room table root:', roomTableRoot.tagName, roomTableRoot.className || roomTableRoot.id || '(no class/id)');
+
+        // Helper: check if element is in room table area (has .hprt-* ancestor)
+        const isInRoomTableArea = (el) => {
+            // Check if element has any .hprt- prefixed class ancestor
+            for (let p = el; p && p !== document.body; p = p.parentElement) {
+                if (p.className && typeof p.className === 'string' && p.className.includes('hprt')) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // STICKY: If current anchor still valid, keep it (prevents jumping)
+        const current = INLINE_STATE.anchorBtn;
+        if (current && current.isConnected && isInRoomTableArea(current)) {
+            const cs = getComputedStyle(current);
+            if (cs.display !== 'none' && cs.visibility !== 'hidden') {
+                return current;
+            }
+        }
+
+        // Find new anchor - must be in room table area, reject sticky/fixed containers
+        const buttons = getAllReserveButtons();
+        console.log('[bookDirect][findInlineAnchorButton] Found', buttons.length, 'buttons total');
 
         for (const btn of buttons) {
-            // If we found room table root, prefer buttons inside it
-            // If not, consider all buttons except sticky/fixed ones
-            const inRoomTable = roomTableRoot ? roomTableRoot.contains(btn) : true;
+            const hasHprtAncestor = isInRoomTableArea(btn);
 
-            // HARD REJECTION: No sticky/fixed ancestors
+            // Only log first few for brevity
+            if (buttons.indexOf(btn) < 3) {
+                console.log('[bookDirect][findInlineAnchorButton] Button:', btn.textContent?.trim()?.substring(0, 15),
+                    '| hprt ancestor:', hasHprtAncestor);
+            }
+
+            // HARD REQUIREMENT: Must be in room table area
+            if (!hasHprtAncestor) continue;
+
+            // Reject sticky/fixed ancestors (property header clones)
             let hasFixedAncestor = false;
-            let parent = btn.parentElement;
-            while (parent && parent !== document.body) {
-                const pcs = getComputedStyle(parent);
+            for (let p = btn.parentElement; p && p !== document.body; p = p.parentElement) {
+                const pcs = getComputedStyle(p);
                 if (pcs.position === 'sticky' || pcs.position === 'fixed') {
                     hasFixedAncestor = true;
                     break;
                 }
-                parent = parent.parentElement;
             }
-
             if (hasFixedAncestor) {
-                Logger.debug('[findInlineAnchorButton] Rejecting button in sticky/fixed container');
+                console.log('[bookDirect][findInlineAnchorButton] Rejecting button in sticky/fixed container');
                 continue;
             }
 
-            // Score: prefer buttons in room table, in viewport, and larger
-            const r = btn.getBoundingClientRect();
-            const inViewport = r.bottom > 0 && r.top < window.innerHeight;
-            let score = 0;
-            if (inRoomTable && roomTableRoot) score += 2000;
-            if (inViewport) score += 1000;
-            score += r.width;
+            // First valid button wins (deterministic, stable)
+            console.log('[bookDirect][findInlineAnchorButton] ✓ Selected anchor:', btn.textContent?.trim());
+            return btn;
+        }
 
-            Logger.debug(`[findInlineAnchorButton] Button score=${score}, inRoomTable=${inRoomTable}, inViewport=${inViewport}`);
+        Logger.warn('[findInlineAnchorButton] No suitable anchor button found in room table');
+        return null;
+    }
 
-            if (score > bestScore) {
-                bestScore = score;
-                best = btn;
+    /**
+     * Ensure inline slot exists in stable CTA container
+     * Uses tighter scope selection order for stability
+     */
+    function ensureInlineSlot(anchorBtn) {
+        if (!anchorBtn) return null;
+
+        // Tighter scope selection order (most specific first)
+        const scope =
+            anchorBtn.closest('.hprt-table-cell-book') ||
+            anchorBtn.closest('.hprt-reservation-cta') ||
+            anchorBtn.closest('td') ||
+            anchorBtn.parentElement;
+
+        if (!scope) return null;
+
+        // If scope unchanged and slot exists, reuse
+        let slot = document.getElementById(INLINE_SLOT_ID);
+        if (slot && INLINE_STATE.scope === scope && slot.isConnected) {
+            return slot;
+        }
+
+        // Create or reuse slot element
+        if (!slot) {
+            slot = document.createElement('div');
+            slot.id = INLINE_SLOT_ID;
+            slot.style.cssText = `
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+                margin-bottom: 8px;
+            `;
+        }
+
+        // Prepend to scope (stable position at top of CTA)
+        scope.prepend(slot);
+
+        // Ensure ghost is inside slot
+        const ghost = getOrCreateInlineGhost();
+        if (ghost.parentNode !== slot) slot.appendChild(ghost);
+
+        INLINE_STATE.slot = slot;
+        INLINE_STATE.scope = scope;
+
+        Logger.debug('[ensureInlineSlot] Slot created in scope:', scope.className || scope.tagName);
+        return slot;
+    }
+
+    /**
+     * Check inline stability for initial-only flicker prevention
+     * Returns true if ghost position is stable for 2+ frames OR if already shown
+     */
+    function checkInlineStability(ghost) {
+        // If already shown once for this anchor, skip gate (no re-hiding)
+        if (INLINE_STATE.hasShown) return true;
+
+        const rect = ghost.getBoundingClientRect();
+        const last = INLINE_STATE.lastRect;
+
+        // Check if position changed significantly
+        const moved = last && (
+            Math.abs(rect.top - last.top) > 2 ||
+            Math.abs(rect.left - last.left) > 2 ||
+            Math.abs(rect.width - last.width) > 2
+        );
+
+        INLINE_STATE.lastRect = { top: rect.top, left: rect.left, width: rect.width };
+
+        if (moved) {
+            INLINE_STATE.stableFrames = 0;
+            return false;
+        }
+
+        INLINE_STATE.stableFrames++;
+        return INLINE_STATE.stableFrames >= 2;
+    }
+
+    /**
+     * Ensure ResizeObserver is set up for inline UI height sync
+     */
+    function ensureInlineResizeObserver(inlineEl) {
+        if (inlineResizeObserver || !inlineEl) return;
+
+        inlineResizeObserver = new ResizeObserver(() => {
+            const ghost = INLINE_STATE.ghost;
+            const host = INLINE_STATE.host;
+
+            if (!ghost?.isConnected) return;
+
+            const rect = inlineEl.getBoundingClientRect();
+            ghost.style.height = `${Math.max(0, Math.round(rect.height))}px`;
+
+            // Re-sync host position after height change
+            if (host?.isConnected) {
+                applyInlineHostDocked(host, ghost);
             }
-        }
+        });
 
-        if (best) {
-            Logger.info('[findInlineAnchorButton] Selected anchor button:', best.textContent?.trim());
-        } else {
-            Logger.warn('[findInlineAnchorButton] No suitable anchor button found');
-        }
-
-        return best;
+        inlineResizeObserver.observe(inlineEl);
+        Logger.debug('[ensureInlineResizeObserver] Observing inline UI for resize');
     }
 
     /**
@@ -1631,66 +1774,114 @@
     }
 
     /**
-     * InlinePlacer: Places the inline micro-card (hidden ↔ button only)
-     * DISABLED: Inline micro-card placement is currently disabled.
-     * The placement logic was selecting wrong anchor buttons (property header instead of room table).
-     * Main panel works correctly. Inline can be re-enabled when placement is fixed.
+     * InlinePlacer: Places the inline micro-card (hidden ↔ docked only)
+     * Single-zone deterministic placement with initial-only stability gate
      */
     function placeInlineUI(inlineEl) {
-        // DISABLED: Always hide inline for now
-        if (inlineEl) {
+        if (!inlineEl) return 'hidden';
+
+        const host = getOrCreateInlineHost();
+        const anchorBtn = findInlineAnchorButton();
+
+        // No valid anchor in room table → hide inline
+        if (!anchorBtn) {
             inlineEl.style.display = 'none';
+            host.style.display = 'none';
+            INLINE_STATE.mode = 'hidden';
+            INLINE_STATE.anchorBtn = null;
+            INLINE_STATE.hasShown = false;  // Reset for next anchor
+            INLINE_STATE.stableFrames = 0;
+            INLINE_STATE.lastRect = null;
+            return 'hidden';
         }
-        const inlineHost = document.getElementById(INLINE_HOST_ID);
-        if (inlineHost) {
-            inlineHost.style.display = 'none';
+
+        // Anchor changed → reset stability gate
+        if (INLINE_STATE.anchorBtn !== anchorBtn) {
+            INLINE_STATE.hasShown = false;
+            INLINE_STATE.stableFrames = 0;
+            INLINE_STATE.lastRect = null;
+            Logger.debug('[placeInlineUI] Anchor changed, resetting stability gate');
         }
-        const inlineGhost = document.getElementById(INLINE_GHOST_ID);
-        if (inlineGhost) {
-            inlineGhost.style.height = '0px';
+        INLINE_STATE.anchorBtn = anchorBtn;
+
+        // Ensure slot exists in CTA container
+        const slot = ensureInlineSlot(anchorBtn);
+        if (!slot) {
+            host.style.display = 'none';
+            INLINE_STATE.mode = 'hidden';
+            return 'hidden';
         }
-        INLINE_STATE.mode = 'hidden';
-        Logger.debug('[inlinePlacer] DISABLED - inline micro-card not placed');
-        return 'hidden';
+
+        const ghost = getOrCreateInlineGhost();
+
+        // Ensure UI is in host (never in Booking DOM)
+        if (inlineEl.parentNode !== host) host.appendChild(inlineEl);
+
+        // CRITICAL: Apply host positioning FIRST (even if hidden)
+        // This ensures correct width before measuring height
+        applyInlineHostDocked(host, ghost);
+
+        // Now measure height and update ghost
+        const inlineRect = inlineEl.getBoundingClientRect();
+        ghost.style.height = `${Math.max(0, Math.round(inlineRect.height))}px`;
+
+        // Re-sync host position after ghost height change
+        applyInlineHostDocked(host, ghost);
+
+        // Check stability gate (initial-only)
+        const isStable = checkInlineStability(ghost);
+
+        if (!isStable) {
+            // Still settling - hide but schedule re-check
+            host.style.opacity = '0';
+            host.style.pointerEvents = 'none';
+            requestAnimationFrame(() => placeInlineUI(inlineEl));
+            return 'stabilizing';
+        }
+
+        // Show the inline card
+        inlineEl.style.display = '';
+        host.style.display = '';
+        host.style.opacity = '1';
+        host.style.pointerEvents = 'auto';
+
+        INLINE_STATE.mode = 'docked';
+        INLINE_STATE.hasShown = true;  // Never hide again for this anchor
+
+        // Setup observers once shown
+        ensureInlineResizeObserver(inlineEl);
+
+        Logger.debug('[placeInlineUI] Inline card docked in room table CTA');
+        return 'docked';
     }
 
     /**
-     * Setup IntersectionObserver for room table visibility
-     * Controls when inline micro-card is enabled
+     * Setup MutationObserver for Booking.com hydration handling
+     * Re-runs placement when room table subtree changes (debounced)
      */
-    function setupRoomTableObserver() {
-        if (roomTableIO) return; // Already set up
+    function setupInlineHydrationObserver() {
+        if (inlineHydrationObserver) return; // Already set up
 
         const roomTableRoot = findRoomTableRoot();
-        if (!roomTableRoot) {
-            Logger.debug('[roomTableIO] No room table found, will retry later');
-            return;
-        }
+        const observeTarget = roomTableRoot || document.body;
 
-        roomTableIO = new IntersectionObserver(
-            (entries) => {
-                const isVisible = entries.some(e => e.isIntersecting);
-                const wasEnabled = INLINE_STATE.enabled;
-                INLINE_STATE.enabled = isVisible;
-
-                if (isVisible !== wasEnabled) {
-                    Logger.info(`[roomTableIO] Room table ${isVisible ? 'VISIBLE' : 'HIDDEN'}`);
-
-                    // Trigger inline placement update
-                    if (uiController && uiController.inlineEl) {
-                        placeInlineUI(uiController.inlineEl);
-                    }
+        inlineHydrationObserver = new MutationObserver(() => {
+            // Debounce to avoid thrashing during rapid hydration
+            clearTimeout(inlinePlacementTimer);
+            inlinePlacementTimer = setTimeout(() => {
+                if (uiController?.inlineEl) {
+                    placeInlineUI(uiController.inlineEl);
                 }
-            },
-            {
-                // Hysteresis: require 20% from top and 45% from bottom to enter
-                rootMargin: '-20% 0px -45% 0px',
-                threshold: 0.01
-            }
-        );
+            }, 50);
+        });
 
-        roomTableIO.observe(roomTableRoot);
-        Logger.info('[roomTableIO] Observing room table for inline visibility');
+        inlineHydrationObserver.observe(observeTarget, {
+            childList: true,
+            subtree: true,
+            attributes: false  // Don't watch attributes (too noisy)
+        });
+
+        Logger.info('[inlineHydration] MutationObserver active on:', observeTarget.tagName || 'body');
     }
 
     /**
@@ -1732,22 +1923,22 @@
     }
 
     /**
-     * Keep two-placer hosts aligned over ghosts while scrolling
+     * Keep two-placer hosts aligned while scrolling
+     * Panel: Updates overlay position for continuous header following
+     * Inline: Syncs docked position over ghost
      */
     function scheduleTwoPlacerSync() {
         if (!uiController) return;
 
         requestAnimationFrame(() => {
-            // Sync panel if in rail mode
-            if (PANEL_STATE.mode === 'rail' && PANEL_STATE.ghost?.isConnected) {
-                const panelHost = document.getElementById(PANEL_HOST_ID);
-                if (panelHost) {
-                    applyPanelHostRail(panelHost, PANEL_STATE.ghost);
-                }
+            // Sync panel overlay position (continuous header-following)
+            const panelHost = document.getElementById(PANEL_HOST_ID);
+            if (panelHost) {
+                applyPanelHostOverlay(panelHost);
             }
 
-            // Sync inline if in button mode
-            if (INLINE_STATE.mode === 'button' && INLINE_STATE.ghost?.isConnected) {
+            // Sync inline if in docked mode (portal must follow ghost on scroll)
+            if (INLINE_STATE.mode === 'docked' && INLINE_STATE.ghost?.isConnected) {
                 const inlineHost = document.getElementById(INLINE_HOST_ID);
                 if (inlineHost) {
                     applyInlineHostDocked(inlineHost, INLINE_STATE.ghost);
@@ -2695,43 +2886,17 @@
                 // Initial placement using new two-placer system
                 placeTwoSurfaceUI();
 
-                // Setup IntersectionObserver for room table visibility (controls inline placement)
-                setupRoomTableObserver();
+                // Setup MutationObserver for Booking.com hydration handling (inline card)
+                setupInlineHydrationObserver();
 
                 // Initialize repair system to fix layout issues after injection
                 initRepairSystem();
 
-                // Hydration guard: recheck placement periodically during Booking's hydration window
-                let hydrationCheckCount = 0;
-                const maxHydrationChecks = 10;
-
-                const checkHydrationAndPlace = () => {
-                    hydrationCheckCount++;
-
-                    // Re-find best visible button (Booking may have swapped DOM)
-                    reserveButton = findBestReserveButton(reserveButton);
-
-                    // Check if panel still in DOM
-                    const panelHost = document.getElementById(PANEL_HOST_ID);
-                    if (!panelHost || !panelHost.contains(app)) {
-                        console.log(`[bookDirect][hydration-guard] ⚠️ Panel host lost, re-placing (check ${hydrationCheckCount}/${maxHydrationChecks})`);
-                    }
-
-                    // Always recheck placement (handles both re-injection and mode switching)
+                // Single initial placement check after a short delay to let Booking hydrate
+                // The MutationObserver will handle subsequent hydration changes
+                setTimeout(() => {
                     placeTwoSurfaceUI();
-
-                    // Schedule more checks during hydration window
-                    if (hydrationCheckCount < maxHydrationChecks) {
-                        setTimeout(checkHydrationAndPlace, 500);
-                    }
-                };
-
-                // Check frequently during first few seconds to catch hydration
-                setTimeout(checkHydrationAndPlace, 300);
-                setTimeout(checkHydrationAndPlace, 600);
-                setTimeout(checkHydrationAndPlace, 1000);
-                setTimeout(checkHydrationAndPlace, 2000);
-                setTimeout(checkHydrationAndPlace, 3000);
+                }, 300);
 
             } else {
                 // LEGACY FALLBACK: Use single-surface createUI if controller not available
