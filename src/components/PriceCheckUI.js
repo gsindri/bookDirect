@@ -58,6 +58,7 @@ window.BookDirect.createUI = function (hotelName, price, isSidebar = false) {
   let _compareStatus = 'idle'; // 'idle' | 'loading' | 'ready' | 'noDates' | 'error'
   let _directPulsed = false; // Prevent re-pulsing
   let _comparePulsed = false; // Prevent re-pulsing
+  let _onCompareDataChange = null; // Callback when compare data changes (for controller sync)
 
   // Get icon URL (needs to be computed before template)
   const iconUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
@@ -3849,6 +3850,11 @@ Best regards,`;
     if (whyMatchLink) {
       whyMatchLink.addEventListener('click', () => showWhyMatchModal(data));
     }
+
+    // Notify controller of data change (for inline card sync)
+    if (_onCompareDataChange) {
+      _onCompareDataChange({ status: 'ready', data });
+    }
   }
 
   // Fetch compare data from background
@@ -3863,6 +3869,11 @@ Best regards,`;
     // Set prices chip to loading state
     _compareStatus = 'loading';
     updatePricesChip({ text: 'Checking…', loading: true });
+
+    // Notify controller of loading state (for inline card sync)
+    if (_onCompareDataChange) {
+      _onCompareDataChange({ status: 'loading', data: null });
+    }
 
     // Only show loading state if prices panel is already open (silent prefetch otherwise)
     if (_activePanel === 'prices') {
@@ -4195,6 +4206,10 @@ Best regards,`;
   container.getPanelState = () => _panelState;
   container.setPanelState = (s) => setPanelState(s, true);
 
+  // Compare data callback for controller sync
+  container.setCompareDataCallback = (cb) => { _onCompareDataChange = cb; };
+  container.getCompareData = () => _lastCompareData;
+
   return container;
 };
 
@@ -4240,6 +4255,26 @@ window.BookDirect.createUIController = function (options = {}) {
   panelEl.id = 'bd-panel-el';
   panelEl.dataset.bdSurface = 'panel';
 
+  // Set up callback to sync compare data from panel to controller state
+  // This enables the inline card to receive data updates
+  if (panelEl.setCompareDataCallback) {
+    panelEl.setCompareDataCallback(({ status, data }) => {
+      state.compareStatus = status;
+      if (data) {
+        state.offers = data;
+        // Re-compute best offer for inline display
+        const offers = data.offers || [];
+        if (offers.length > 0) {
+          state.bestOffer = offers.reduce((best, offer) => {
+            if (!best) return offer;
+            return (offer.total || Infinity) < (best.total || Infinity) ? offer : best;
+          }, null);
+        }
+      }
+      renderInline();
+    });
+  }
+
   // ========================================
   // CREATE INLINE MICRO-CARD (minimal stub for Phase 1)
   // ========================================
@@ -4255,7 +4290,7 @@ window.BookDirect.createUIController = function (options = {}) {
 
   const inlineShadow = inlineEl.attachShadow({ mode: 'closed' });
 
-  // Minimal inline micro-card styles
+  // Inline micro-card styles - "Other sites" focus
   const inlineStyles = document.createElement('style');
   inlineStyles.textContent = `
     :host {
@@ -4271,8 +4306,15 @@ window.BookDirect.createUIController = function (options = {}) {
       padding: 12px 14px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
       font-family: inherit;
-      min-width: 200px;
-      max-width: 280px;
+      min-width: 220px;
+      max-width: 300px;
+    }
+
+    .inline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
     }
 
     .inline-title {
@@ -4281,55 +4323,130 @@ window.BookDirect.createUIController = function (options = {}) {
       text-transform: uppercase;
       letter-spacing: 0.04em;
       color: #6366f1;
-      margin-bottom: 6px;
     }
 
-    .inline-savings {
-      font-size: 14px;
-      font-weight: 700;
-      color: #059669;
-      margin-bottom: 10px;
+    .inline-info {
+      font-size: 12px;
+      color: #9ca3af;
+      cursor: help;
     }
 
-    .inline-savings.no-savings {
-      color: #6b7280;
+    /* Offers list */
+    .inline-offers {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
-    .inline-cta {
-      display: block;
-      width: 100%;
-      padding: 10px 14px;
-      background: #6366f1;
-      color: #ffffff;
-      border: none;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      text-align: center;
+    .inline-offer-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      background: #f0fdf4;
+      border-radius: 6px;
       text-decoration: none;
+      color: inherit;
+      transition: background 100ms ease;
       cursor: pointer;
-      transition: background 140ms ease, transform 140ms ease;
     }
 
-    .inline-cta:hover {
-      background: #4f46e5;
-      transform: translateY(-1px);
+    .inline-offer-row:hover {
+      background: #dcfce7;
     }
 
-    .inline-cta:active {
-      transform: translateY(0);
+    .offer-source {
+      font-weight: 500;
+      font-size: 12px;
+      color: #374151;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .inline-details {
+    .offer-price {
+      font-weight: 600;
+      font-size: 12px;
+      color: #059669;
+      margin: 0 8px;
+      white-space: nowrap;
+    }
+
+    .offer-savings {
+      font-size: 10px;
+      font-weight: 500;
+      color: #10b981;
+      background: #d1fae5;
+      padding: 2px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .offer-savings.verify {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    /* Booking baseline */
+    .inline-baseline {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
       margin-top: 8px;
       font-size: 11px;
-      color: #6b7280;
-      text-align: center;
-      cursor: pointer;
+      color: #9ca3af;
+      border-top: 1px solid #e5e7eb;
     }
 
-    .inline-details:hover {
+    .baseline-price {
+      font-weight: 500;
+    }
+
+    /* Verified state (no cheaper deals) */
+    .inline-verified {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 8px;
+      gap: 4px;
+      text-align: center;
+    }
+
+    .verified-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    .verified-icon {
+      font-size: 16px;
+      color: #10b981;
+    }
+
+    .verified-subtitle {
+      font-size: 11px;
+      color: #6b7280;
+    }
+
+    /* Footer */
+    .inline-footer {
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    .inline-expand {
+      font-size: 11px;
       color: #6366f1;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .inline-expand:hover {
       text-decoration: underline;
     }
 
@@ -4337,9 +4454,11 @@ window.BookDirect.createUIController = function (options = {}) {
     .inline-loading {
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 8px;
       color: #6b7280;
       font-size: 12px;
+      padding: 8px 0;
     }
 
     .inline-spinner {
@@ -4368,19 +4487,38 @@ window.BookDirect.createUIController = function (options = {}) {
 
     @media (prefers-reduced-motion: reduce) {
       .inline-card.pulse { animation: none; }
-      .inline-cta { transition: none; }
-      .inline-cta:hover { transform: none; }
+      .inline-offer-row { transition: none; }
     }
   `;
 
-  // Initial inline HTML
+  // Initial inline HTML - "Other sites" structure
   const inlineContent = document.createElement('div');
   inlineContent.className = 'inline-card';
   inlineContent.innerHTML = `
-    <div class="inline-title">Better deal on direct site</div>
-    <div class="inline-savings">Checking prices…</div>
-    <a class="inline-cta" href="#" target="_blank" rel="noopener noreferrer">Visit direct website</a>
-    <div class="inline-details" data-action="show-panel">See details</div>
+    <div class="inline-header">
+      <span class="inline-title">Other sites</span>
+      <span class="inline-info" title="Prices may differ slightly due to taxes/fees">ⓘ</span>
+    </div>
+    <div class="inline-offers">
+      <div class="inline-loading">
+        <span class="inline-spinner"></span>
+        Checking other sites…
+      </div>
+    </div>
+    <div class="inline-verified" style="display:none">
+      <div class="verified-row">
+        <span class="verified-icon">✓</span>
+        <span>Other sites checked</span>
+      </div>
+      <span class="verified-subtitle">Booking is best right now</span>
+    </div>
+    <div class="inline-baseline" style="display:none">
+      <span class="baseline-source">Booking</span>
+      <span class="baseline-price">—</span>
+    </div>
+    <div class="inline-footer" style="display:none">
+      <span class="inline-expand" data-action="see-all">See all deals</span>
+    </div>
   `;
 
   inlineShadow.appendChild(inlineStyles);
@@ -4388,12 +4526,36 @@ window.BookDirect.createUIController = function (options = {}) {
 
   // Get inline elements for updates
   const inlineCard = inlineContent;
-  const inlineSavingsEl = inlineContent.querySelector('.inline-savings');
-  const inlineCtaEl = inlineContent.querySelector('.inline-cta');
+  const inlineOffersEl = inlineContent.querySelector('.inline-offers');
+  const inlineVerifiedEl = inlineContent.querySelector('.inline-verified');
+  const inlineBaselineEl = inlineContent.querySelector('.inline-baseline');
+  const inlineFooterEl = inlineContent.querySelector('.inline-footer');
+  const inlineExpandEl = inlineContent.querySelector('.inline-expand');
 
   // ========================================
   // CONTROLLER METHODS (shared updates)
   // ========================================
+
+  // Format price for display
+  function formatInlinePrice(amount, currency) {
+    if (!Number.isFinite(amount)) return '—';
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currency || 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(amount);
+    } catch {
+      return `${currency || '$'}${Math.round(amount).toLocaleString()}`;
+    }
+  }
+
+  // Escape HTML for safe rendering
+  function escInline(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 
   function renderInline() {
     if (!state.inlineVisible) {
@@ -4402,36 +4564,94 @@ window.BookDirect.createUIController = function (options = {}) {
     }
     inlineEl.style.display = 'block';
 
+    // Loading state
     if (state.compareStatus === 'loading') {
-      inlineSavingsEl.innerHTML = `
-        <span class="inline-loading">
+      inlineOffersEl.innerHTML = `
+        <div class="inline-loading">
           <span class="inline-spinner"></span>
-          Checking prices…
-        </span>
+          Checking other sites…
+        </div>
       `;
+      inlineOffersEl.style.display = 'block';
+      inlineVerifiedEl.style.display = 'none';
+      inlineBaselineEl.style.display = 'none';
+      inlineFooterEl.style.display = 'none';
       return;
     }
 
-    if (!state.offers || !state.bestOffer) {
-      inlineSavingsEl.textContent = 'No offers found';
-      inlineSavingsEl.classList.add('no-savings');
+    // Get offers and booking price
+    const offers = state.offers?.result?.offers || state.offers?.offers || [];
+    const bookingPrice = state.priceNumber;
+    const currency = state.offers?.result?.query?.currency || state.offers?.query?.currency || 'USD';
+
+    // No data yet
+    if (!offers.length || !bookingPrice) {
+      inlineOffersEl.innerHTML = '<div class="inline-loading">No price data</div>';
+      inlineOffersEl.style.display = 'block';
+      inlineVerifiedEl.style.display = 'none';
+      inlineBaselineEl.style.display = 'none';
+      inlineFooterEl.style.display = 'none';
       return;
     }
 
-    const best = state.bestOffer;
-    inlineSavingsEl.classList.remove('no-savings');
+    // Filter to 3rd-party offers cheaper than Booking by meaningful threshold
+    const cheaperOffers = offers.filter(o => {
+      if (!o.total || !bookingPrice) return false;
+      const source = (o.source || '').toLowerCase();
+      // Exclude Booking.com itself
+      if (source.includes('booking')) return false;
 
-    if (best.savings && best.savings > 0) {
-      const savingsText = best.savingsDisplay || `Save ${best.savings.toFixed(0)}`;
-      inlineSavingsEl.textContent = savingsText;
+      // Meaningful savings threshold: ≥2% OR ≥$5 equivalent
+      const savings = bookingPrice - o.total;
+      const savingsPercent = (savings / bookingPrice) * 100;
+      return savings > 0 && (savingsPercent >= 2 || savings >= 5);
+    });
+
+    // Sort by price ascending (cheapest first)
+    cheaperOffers.sort((a, b) => (a.total || Infinity) - (b.total || Infinity));
+
+    if (cheaperOffers.length === 0) {
+      // VERIFIED STATE: No cheaper deals found
+      inlineOffersEl.style.display = 'none';
+      inlineVerifiedEl.style.display = 'flex';
+      inlineBaselineEl.style.display = 'none';
+      inlineFooterEl.style.display = 'block';
+      inlineExpandEl.textContent = `See all sites (${offers.length})`;
     } else {
-      inlineSavingsEl.textContent = 'Similar price';
-      inlineSavingsEl.classList.add('no-savings');
-    }
+      // OFFERS STATE: Show top 3 cheaper offers
+      const topOffers = cheaperOffers.slice(0, 3);
 
-    // Update CTA link
-    if (best.link) {
-      inlineCtaEl.href = best.link;
+      inlineOffersEl.innerHTML = topOffers.map(o => {
+        const savings = bookingPrice - o.total;
+        const savingsPercent = Math.round((savings / bookingPrice) * 100);
+
+        // Sanity check: >50% savings should show "Verify" instead
+        const isExtremeSavings = savingsPercent > 50;
+        const savingsClass = isExtremeSavings ? 'offer-savings verify' : 'offer-savings';
+        const savingsText = isExtremeSavings ? 'Verify price' : `Save ${savingsPercent}%`;
+
+        const link = o.link || '#';
+        const source = o.source || 'Unknown';
+
+        return `
+          <a class="inline-offer-row" href="${escInline(link)}" target="_blank" rel="noopener noreferrer">
+            <span class="offer-source">${escInline(source)}</span>
+            <span class="offer-price">${formatInlinePrice(o.total, currency)}</span>
+            <span class="${savingsClass}">${savingsText}</span>
+          </a>
+        `;
+      }).join('');
+
+      inlineOffersEl.style.display = 'block';
+      inlineVerifiedEl.style.display = 'none';
+
+      // Show Booking baseline
+      inlineBaselineEl.style.display = 'flex';
+      inlineBaselineEl.querySelector('.baseline-price').textContent = formatInlinePrice(bookingPrice, currency);
+
+      // Show footer with total count
+      inlineFooterEl.style.display = 'block';
+      inlineExpandEl.textContent = `See all deals (${offers.length})`;
     }
   }
 
@@ -4586,9 +4806,7 @@ window.BookDirect.createUIController = function (options = {}) {
 
     updateHotelInfo(info) {
       if (panelEl.updateHotelInfo) panelEl.updateHotelInfo(info);
-      if (info?.urlToBook) {
-        inlineCtaEl.href = info.urlToBook;
-      }
+      // Note: Direct site CTA removed from inline - inline now focuses on other sites
     },
 
     // ----------------------------------------
@@ -4609,13 +4827,25 @@ window.BookDirect.createUIController = function (options = {}) {
     }
   };
 
-  // Wire up "See details" click to expand panel
-  const detailsLink = inlineShadow.querySelector('[data-action="show-panel"]');
-  if (detailsLink) {
-    detailsLink.addEventListener('click', (e) => {
+  // Wire up "See all deals" click to open panel and highlight deals
+  const seeAllLink = inlineShadow.querySelector('[data-action="see-all"]');
+  if (seeAllLink) {
+    seeAllLink.addEventListener('click', (e) => {
       e.preventDefault();
+      // Expand and pin panel
       controller.setPanelState('pinned');
-      // TODO: Phase 2 will scroll to panel or expand it
+      if (panelEl.expandIfMinimized) panelEl.expandIfMinimized();
+
+      // Switch to prices/deals view in panel
+      if (panelEl._setActivePanel) {
+        panelEl._setActivePanel('prices');
+      }
+
+      // Subtle highlight pulse on panel
+      panelEl.classList.add('bd-highlight');
+      setTimeout(() => panelEl.classList.remove('bd-highlight'), 600);
+
+      console.log('[bookDirect] Inline: See all deals clicked');
     });
   }
 
