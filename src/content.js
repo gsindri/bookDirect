@@ -1785,7 +1785,12 @@
 
         // No valid anchor in room table → hide inline
         if (!anchorBtn) {
-            inlineEl.style.display = 'none';
+            // IMPORTANT: tell UI controller to update internal state + render
+            if (uiController?.hideInline) {
+                uiController.hideInline();
+            } else {
+                inlineEl.style.display = 'none';
+            }
             host.style.display = 'none';
             INLINE_STATE.mode = 'hidden';
             INLINE_STATE.anchorBtn = null;
@@ -1839,8 +1844,12 @@
             return 'stabilizing';
         }
 
-        // Show the inline card
-        inlineEl.style.display = '';
+        // Show the inline card (and let UI controller render state)
+        if (uiController?.showInline) {
+            uiController.showInline();
+        } else {
+            inlineEl.style.display = '';
+        }
         host.style.display = '';
         host.style.opacity = '1';
         host.style.pointerEvents = 'auto';

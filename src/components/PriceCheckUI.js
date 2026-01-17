@@ -3855,6 +3855,30 @@ Best regards,`;
     if (_onCompareDataChange) {
       _onCompareDataChange({ status: 'ready', data });
     }
+
+    // BROADCAST: emit to all listeners via bridge
+    if (typeof emitCompareUpdate === 'function') {
+      emitCompareUpdate('ready', data);
+    }
+  }
+
+  // ========================================
+  // COMPARE UPDATE BRIDGE (broadcasts state to inline controller)
+  // ========================================
+  function emitCompareUpdate(status, data) {
+    try {
+      const detail = { status, data };
+      // Callback-based listener (for controller wiring)
+      if (typeof container.onCompareUpdate === 'function') {
+        container.onCompareUpdate(detail);
+      }
+      // Event-based listener (for decoupled consumers)
+      if (typeof container.dispatchEvent === 'function') {
+        container.dispatchEvent(new CustomEvent('bd:compare', { detail }));
+      }
+    } catch (e) {
+      console.warn('bookDirect: emitCompareUpdate error', e);
+    }
   }
 
   // Fetch compare data from background
@@ -3874,6 +3898,7 @@ Best regards,`;
     if (_onCompareDataChange) {
       _onCompareDataChange({ status: 'loading', data: null });
     }
+    emitCompareUpdate('loading', null);
 
     // Only show loading state if prices panel is already open (silent prefetch otherwise)
     if (_activePanel === 'prices') {
@@ -3914,6 +3939,7 @@ Best regards,`;
         showCompareState('no-dates');
         _compareStatus = 'noDates';
         updatePricesChip({ text: 'Add dates', loading: false });
+        emitCompareUpdate('noDates', response);
         return;
       }
 
@@ -3993,6 +4019,8 @@ Best regards,`;
 
         compareError.textContent = userMessage;
         showCompareState('error');
+        _compareStatus = 'error';
+        emitCompareUpdate('error', response);
         updateCompareFooter();
         return;
       }
@@ -4027,6 +4055,7 @@ Best regards,`;
       showCompareState('error');
       _compareStatus = 'error';
       updatePricesChip({ text: '', loading: false });
+      emitCompareUpdate('error', { error: err?.message || 'compare_failed' });
       updateCompareFooter();
     }
   }
@@ -4847,6 +4876,41 @@ window.BookDirect.createUIController = function (options = {}) {
 
       console.log('[bookDirect] Inline: See all deals clicked');
     });
+  }
+
+  // ========================================
+  // COMPARE UPDATE BRIDGE LISTENER
+  // ========================================
+  // Subscribes to compare lifecycle updates from the panel
+  // to keep the inline card in sync with loading/error/ready states
+  const handleCompareUpdate = (detail) => {
+    if (!detail) return;
+
+    const status = detail.status || 'idle';
+    const data = detail.data || null;
+
+    // Update state based on status
+    state.compareStatus = status;
+
+    // For 'ready' status with valid data, delegate to updateOffers
+    const isReadyPayload = status === 'ready' && data && !data.error && (data.ok || Array.isArray(data.offers) || data.cheapestOfficial);
+    if (isReadyPayload) {
+      controller.updateOffers(data);
+      return;
+    }
+
+    // For other states (loading, noDates, error), just update state and re-render
+    state.offers = data;
+    state.bestOffer = null;
+    renderInline();
+  };
+
+  // Register callback listener
+  panelEl.onCompareUpdate = handleCompareUpdate;
+
+  // Register event listener (fallback)
+  if (typeof panelEl.addEventListener === 'function') {
+    panelEl.addEventListener('bd:compare', (e) => handleCompareUpdate(e.detail));
   }
 
   return controller;
