@@ -4335,8 +4335,10 @@ window.BookDirect.createUIController = function (options = {}) {
       padding: 12px 14px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
       font-family: inherit;
-      min-width: 220px;
-      max-width: 300px;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
     }
 
     .inline-header {

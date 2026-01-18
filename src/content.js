@@ -1790,14 +1790,13 @@
         // Fallback header height if none detected
         const HEADER_HEIGHT = headerBottom > 0 ? headerBottom : 64;
 
-        // OUT OF ZONE: Ghost is completely scrolled past (bottom above header)
-        if (r.bottom < HEADER_HEIGHT) {
-            host.style.display = 'none';
-            return 'out-of-zone';
-        }
+        // Calculate visible height (how much of the card is between header and viewport bottom)
+        const visibleTop = Math.max(r.top, HEADER_HEIGHT);
+        const visibleBottom = Math.min(r.bottom, viewportHeight);
+        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-        // OUT OF ZONE: Ghost hasn't scrolled into view yet
-        if (r.top > viewportHeight) {
+        // OUT OF ZONE: Less than 20px visible → hide to prevent frantic appearing
+        if (visibleHeight < 20) {
             host.style.display = 'none';
             return 'out-of-zone';
         }
@@ -1811,6 +1810,7 @@
         host.style.right = 'auto';
         host.style.bottom = 'auto';
         host.style.zIndex = '2147483647';
+        host.style.overflow = 'hidden'; // Clip any overflow content
 
         // Use clipPath to hide the portion above the header (creates smooth sliding effect)
         const clipTop = Math.max(0, HEADER_HEIGHT - r.top);
