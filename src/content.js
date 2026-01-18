@@ -1759,8 +1759,8 @@
 
     /**
      * Apply button-docked positioning to inline host (over ghost)
-     * Respects sticky room table header to prevent overlap
-     * Returns 'positioned' if card is placed, 'out-of-zone' if ghost is outside valid area
+     * Uses clipPath to create smooth header clipping (same approach as main panel)
+     * Returns 'positioned' if card is visible, 'out-of-zone' if completely scrolled out
      */
     function applyInlineHostDocked(host, ghost) {
         if (!host || !ghost) return 'out-of-zone';
@@ -1768,16 +1768,16 @@
         const r = ghost.getBoundingClientRect();
         const viewportHeight = window.innerHeight;
 
-        // Detect sticky room table header to determine minimum top boundary
+        // Detect sticky room table header height
+        // Booking's room table header is typically around 64-80px when sticky
         let headerBottom = 0;
         try {
-            // Try to find the room table's sticky header via computed style
-            const stickyHeaders = document.querySelectorAll('thead, [class*="sticky"], [data-testid*="header"]');
+            const stickyHeaders = document.querySelectorAll('thead, [class*="sticky"]');
             for (const el of stickyHeaders) {
                 const style = getComputedStyle(el);
                 if (style.position === 'sticky' || style.position === 'fixed') {
                     const elRect = el.getBoundingClientRect();
-                    // Only consider headers that are near the top of viewport (not hidden above)
+                    // Only consider headers near viewport top
                     if (elRect.bottom > 0 && elRect.top < 150) {
                         headerBottom = Math.max(headerBottom, elRect.bottom);
                     }
@@ -1787,33 +1787,38 @@
             // Ignore errors
         }
 
-        // ZONE CHECKS: Hide card if ghost is outside valid display area
-        // 1. Ghost bottom is above the header (scrolled past) → hide
-        if (r.bottom < headerBottom + 20) {
+        // Fallback header height if none detected
+        const HEADER_HEIGHT = headerBottom > 0 ? headerBottom : 64;
+
+        // OUT OF ZONE: Ghost is completely scrolled past (bottom above header)
+        if (r.bottom < HEADER_HEIGHT) {
             host.style.display = 'none';
             return 'out-of-zone';
         }
 
-        // 2. Ghost top is below viewport (hasn't scrolled into view yet) → hide
+        // OUT OF ZONE: Ghost hasn't scrolled into view yet
         if (r.top > viewportHeight) {
             host.style.display = 'none';
             return 'out-of-zone';
         }
 
-        // Ghost is in valid zone - position the card
+        // IN ZONE: Position exactly at ghost location
         host.style.display = '';
-
-        // Clamp top position to respect header boundary (with 4px buffer)
-        const minTop = headerBottom > 0 ? headerBottom + 4 : 0;
-        const clampedTop = Math.max(r.top, minTop);
-
         host.style.position = 'fixed';
-        host.style.top = `${clampedTop}px`;
+        host.style.top = `${r.top}px`;
         host.style.left = `${r.left}px`;
         host.style.width = `${r.width}px`;
         host.style.right = 'auto';
         host.style.bottom = 'auto';
         host.style.zIndex = '2147483647';
+
+        // Use clipPath to hide the portion above the header (creates smooth sliding effect)
+        const clipTop = Math.max(0, HEADER_HEIGHT - r.top);
+        if (clipTop > 0) {
+            host.style.clipPath = `inset(${clipTop}px 0 0 0)`;
+        } else {
+            host.style.clipPath = 'none';
+        }
 
         return 'positioned';
     }
