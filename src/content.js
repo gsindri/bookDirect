@@ -1967,22 +1967,44 @@
         // Ensure UI is in host (never in Booking DOM)
         if (inlineEl.parentNode !== host) host.appendChild(inlineEl);
 
-        // CRITICAL: Apply host positioning FIRST (even if hidden)
-        // This ensures correct width before measuring height
-        applyInlineHostDocked(host, ghost);
+        // --- PRIME: make host measurable at the ghost's width (but invisible) ---
+        const gr = ghost.getBoundingClientRect();
+        host.style.display = '';
+        host.style.position = 'fixed';
+        host.style.left = `${gr.left}px`;
+        host.style.top = `${gr.top}px`;
+        host.style.width = `${gr.width}px`;
+        host.style.right = 'auto';
+        host.style.bottom = 'auto';
+        host.style.zIndex = '2147483647';
+
+        // Keep it invisible during measurement so there is zero flash
+        host.style.opacity = '0';
+        host.style.pointerEvents = 'none';
+
+        // Force inline to layout for measurement even if controller currently hides it
+        const prevDisplay = inlineEl.style.display;
+        const prevVisibility = inlineEl.style.visibility;
+        inlineEl.style.display = 'block';
+        inlineEl.style.visibility = 'hidden';
 
         // Now measure height and update ghost
         const inlineRect = inlineEl.getBoundingClientRect();
-        ghost.style.height = `${Math.max(0, Math.round(inlineRect.height))}px`;
+        const measuredH = Math.max(40, Math.round(inlineRect.height)); // bootstrap min height
+        ghost.style.height = `${measuredH}px`;
 
-        // Re-sync host position after ghost height change
+        // Restore inline element styles (controller will manage real visibility)
+        inlineEl.style.visibility = prevVisibility || '';
+        inlineEl.style.display = prevDisplay || '';
+
+        // Now apply real docked positioning/clipping based on the *real ghost height*
         const status = applyInlineHostDocked(host, ghost);
 
         // If we're out-of-zone, DO NOT force-show the host (prevents peeking after scroll idle)
         if (status === 'out-of-zone') {
-            host.style.display = '';              // keep in DOM, but applyInlineHostDocked already hid it
+            if (uiController?.hideInline) uiController.hideInline();
+            host.style.display = 'none';
             INLINE_STATE.mode = 'docked';         // keep syncing on future scrolls
-            INLINE_STATE.hasShown = true;         // don't re-run initial stability gate forever
             return 'out-of-zone';
         }
 
@@ -1997,14 +2019,22 @@
             return 'stabilizing';
         }
 
-        // Show the inline card (do NOT override host opacity/pointer-events here;
-        // applyInlineHostDocked controls visibility deterministically)
+        // Show the inline card via controller
         if (uiController?.showInline) {
             uiController.showInline();
         } else {
             inlineEl.style.display = '';
         }
         host.style.display = '';
+
+        // Final resync: ensure ghost height matches the real rendered inline content
+        requestAnimationFrame(() => {
+            const rect = inlineEl.getBoundingClientRect();
+            ghost.style.height = `${Math.max(40, Math.round(rect.height))}px`;
+            applyInlineHostDocked(host, ghost);
+            host.style.opacity = '1';
+            host.style.pointerEvents = 'auto';
+        });
 
         INLINE_STATE.mode = 'docked';
         INLINE_STATE.hasShown = true;  // Never hide again for this anchor
