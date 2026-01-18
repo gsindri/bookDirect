@@ -111,45 +111,60 @@
     }
 
     /**
-     * Find a stable header bottom boundary for a specific card rect
-     * Filters for headers that overlap horizontally and are near viewport top
+     * Detect the real top obstruction using elementsFromPoint
+     * This avoids brittle selectors and automatically tracks whatever is "on top"
+     */
+    function getTopObstructionBottomAtX(x) {
+        // Sample a vertical line near the top of the viewport
+        const ys = [0, 4, 8, 12, 16, 24, 32, 48, 64, 80, 96, 128, 160];
+        let bottom = 0;
+
+        for (const y of ys) {
+            const stack = document.elementsFromPoint(x, y) || [];
+            for (const el of stack) {
+                if (!el || !el.getBoundingClientRect) continue;
+
+                // Ignore our own injected surfaces/hosts/ghosts
+                const id = el.id || '';
+                if (id.startsWith('bd-')) continue;
+
+                // Walk up to the nearest fixed/sticky ancestor
+                let p = el;
+                let fixedish = null;
+                while (p && p !== document.body) {
+                    const cs = getComputedStyle(p);
+                    if (cs.position === 'fixed' || cs.position === 'sticky') {
+                        fixedish = p;
+                        break;
+                    }
+                    p = p.parentElement;
+                }
+
+                const target = fixedish || el;
+                const r = target.getBoundingClientRect();
+
+                // Only consider top-of-viewport obstructions
+                if (r.bottom <= 0) continue;
+                if (r.top >= 220) continue;
+
+                bottom = Math.max(bottom, r.bottom);
+                break; // Topmost element at this y is enough
+            }
+        }
+
+        return bottom; // 0 if nothing obstructing
+    }
+
+    /**
+     * Find header bottom for a card, using elementsFromPoint for robustness
      */
     function getHeaderBottomForCard(cardRect) {
-        // Cache candidates per session (or refresh once per few seconds if needed)
-        if (!INLINE_STATE.headerCandidates) {
-            const candidates = [];
+        // Sample near the right edge of the card (where inline lives)
+        const x = cardRect
+            ? Math.max(8, Math.min(window.innerWidth - 8, cardRect.right - 8))
+            : (window.innerWidth - 24);
 
-            // Main Booking header
-            const mainHeader =
-                document.querySelector('[data-testid="header-wrapper"]') ||
-                document.querySelector('header[data-component="header"]') ||
-                document.querySelector('.bui-header');
-            if (mainHeader) candidates.push(mainHeader);
-
-            // Room-table-ish sticky headers
-            document.querySelectorAll('thead, [class*="sticky"], [data-testid*="sticky"]').forEach(el => {
-                candidates.push(el);
-            });
-
-            INLINE_STATE.headerCandidates = candidates;
-        }
-
-        let bottom = 0;
-        for (const el of INLINE_STATE.headerCandidates) {
-            if (!el || !el.isConnected) continue;
-
-            const cs = getComputedStyle(el);
-            if (cs.position !== 'sticky' && cs.position !== 'fixed') continue;
-
-            const r = el.getBoundingClientRect();
-            if (r.bottom <= 0) continue;         // Fully above viewport
-            if (r.top >= 200) continue;          // Not in the top area where we expect headers
-            if (!rectsOverlapX(r, cardRect)) continue;
-
-            bottom = Math.max(bottom, r.bottom);
-        }
-
-        return bottom;
+        return getTopObstructionBottomAtX(x);
     }
 
     // Inline-specific observers (separate from main card system)
@@ -1494,29 +1509,13 @@
     function applyPanelHostOverlay(host) {
         if (!host) return;
 
-        // Detect Booking header (multiple possible selectors)
-        const bookingHeader = document.querySelector('[data-testid="header-wrapper"]') ||
-            document.querySelector('.bui-header') ||
-            document.querySelector('#b2indexPage header') ||
-            document.querySelector('header[data-component="header"]');
-
-        // Calculate adaptive top offset - CONTINUOUS tracking
         const MIN_OFFSET = 24;  // Never glued to top edge
         const HEADER_PADDING = 16;  // Gap below header
 
-        let topOffset;
+        // Measure the real obstruction at the panel's x position (right side)
+        const headerBottom = getTopObstructionBottomAtX(window.innerWidth - 24);
 
-        if (bookingHeader) {
-            const headerRect = bookingHeader.getBoundingClientRect();
-            // Follow header bottom directly (stays 16px below header)
-            topOffset = Math.max(MIN_OFFSET, headerRect.bottom + HEADER_PADDING);
-        } else {
-            // Fallback: estimate based on scroll position
-            // Assume header is ~64px fixed height, page header area is ~140px
-            const scrollY = window.scrollY || window.pageYOffset;
-            const estimatedHeaderBottom = Math.max(0, 140 - scrollY);
-            topOffset = Math.max(MIN_OFFSET, estimatedHeaderBottom + HEADER_PADDING);
-        }
+        let topOffset = Math.max(MIN_OFFSET, headerBottom + HEADER_PADDING);
 
         // Cap at reasonable maximum
         topOffset = Math.min(topOffset, 200);
@@ -1869,23 +1868,9 @@
         const windowBottom = pxFloor(visibleBottom);
         const windowHeight = Math.max(0, windowBottom - windowTop);
 
-        // Hysteresis: separate hide/show thresholds to prevent flickering
-        const HIDE_PX = 12;
-        const SHOW_PX = 28;
-        const vis = INLINE_STATE.visibility;
-
-        // First-show bypass: if we've never shown and have a reasonable visible height, show immediately
-        const isFirstShow = !INLINE_STATE.hasShown && windowHeight > HIDE_PX;
-
-        if (!vis.hidden) {
-            if (windowHeight < HIDE_PX) vis.hidden = true;
-        } else {
-            // Allow showing if above threshold OR first-show condition
-            if (windowHeight > SHOW_PX || isFirstShow) vis.hidden = false;
-        }
-
-        // Use opacity + pointer-events for smoother transitions than display:none
-        if (vis.hidden || windowHeight <= 0) {
+        // STOIC RULE: visible => show, not visible => hide
+        // No fancy hysteresis - checkInlineStability handles initial flicker
+        if (windowHeight <= 0) {
             host.style.opacity = '0';
             host.style.pointerEvents = 'none';
             return 'out-of-zone';
