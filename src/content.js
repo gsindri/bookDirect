@@ -73,7 +73,68 @@
         hasShown: false,       // Initial-only stability gate flag
         stableFrames: 0,       // Stability counter (frames with no movement)
         lastRect: null,        // Last ghost rect for stability check
+        // New robust positioning state
+        visibility: { hidden: true },
+        headerCandidates: null,
+        roomTableRoot: null,
     };
+
+    /**
+     * Coordinate-safe rounding for sub-pixel accuracy (v * DPR / DPR)
+     */
+    function px(v) {
+        const dpr = window.devicePixelRatio || 1;
+        return Math.round(v * dpr) / dpr;
+    }
+
+    /**
+     * Check if two rects overlap horizontally
+     */
+    function rectsOverlapX(a, b) {
+        return !(a.right <= b.left || a.left >= b.right);
+    }
+
+    /**
+     * Find a stable header bottom boundary for a specific card rect
+     * Filters for headers that overlap horizontally and are near viewport top
+     */
+    function getHeaderBottomForCard(cardRect) {
+        // Cache candidates per session (or refresh once per few seconds if needed)
+        if (!INLINE_STATE.headerCandidates) {
+            const candidates = [];
+
+            // Main Booking header
+            const mainHeader =
+                document.querySelector('[data-testid="header-wrapper"]') ||
+                document.querySelector('header[data-component="header"]') ||
+                document.querySelector('.bui-header');
+            if (mainHeader) candidates.push(mainHeader);
+
+            // Room-table-ish sticky headers
+            document.querySelectorAll('thead, [class*="sticky"], [data-testid*="sticky"]').forEach(el => {
+                candidates.push(el);
+            });
+
+            INLINE_STATE.headerCandidates = candidates;
+        }
+
+        let bottom = 0;
+        for (const el of INLINE_STATE.headerCandidates) {
+            if (!el || !el.isConnected) continue;
+
+            const cs = getComputedStyle(el);
+            if (cs.position !== 'sticky' && cs.position !== 'fixed') continue;
+
+            const r = el.getBoundingClientRect();
+            if (r.bottom <= 0) continue;         // Fully above viewport
+            if (r.top >= 200) continue;          // Not in the top area where we expect headers
+            if (!rectsOverlapX(r, cardRect)) continue;
+
+            bottom = Math.max(bottom, r.bottom);
+        }
+
+        return bottom;
+    }
 
     // Inline-specific observers (separate from main card system)
     let inlineHydrationObserver = null;
@@ -1587,6 +1648,7 @@
      */
     function findInlineAnchorButton() {
         const roomTableRoot = findRoomTableRoot();
+        INLINE_STATE.roomTableRoot = roomTableRoot;
 
         // HARD REQUIREMENT: No room table = no inline card
         if (!roomTableRoot) {
@@ -1762,65 +1824,69 @@
      * Uses clipPath to create smooth header clipping (same approach as main panel)
      * Returns 'positioned' if card is visible, 'out-of-zone' if completely scrolled out
      */
+    /**
+     * Apply button-docked positioning to inline host (over ghost)
+     * Uses a "windowing" approach: host becomes the visible viewport,
+     * child is shifted via transform to track ghost.
+     * Returns 'positioned' if visible, 'out-of-zone' if hidden.
+     */
     function applyInlineHostDocked(host, ghost) {
         if (!host || !ghost) return 'out-of-zone';
 
-        const r = ghost.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
+        const g = ghost.getBoundingClientRect();
+        const vh = window.innerHeight;
 
-        // Detect sticky room table header height
-        // Booking's room table header is typically around 64-80px when sticky
-        let headerBottom = 0;
-        try {
-            const stickyHeaders = document.querySelectorAll('thead, [class*="sticky"]');
-            for (const el of stickyHeaders) {
-                const style = getComputedStyle(el);
-                if (style.position === 'sticky' || style.position === 'fixed') {
-                    const elRect = el.getBoundingClientRect();
-                    // Only consider headers near viewport top
-                    if (elRect.bottom > 0 && elRect.top < 150) {
-                        headerBottom = Math.max(headerBottom, elRect.bottom);
-                    }
-                }
-            }
-        } catch (e) {
-            // Ignore errors
-        }
+        // Stable zone boundaries: respect both headers and the room table area
+        const tableRect = INLINE_STATE.roomTableRoot?.getBoundingClientRect?.() || null;
+        const headerBottom = getHeaderBottomForCard(g);
 
-        // Fallback header height if none detected
-        const HEADER_HEIGHT = headerBottom > 0 ? headerBottom : 64;
+        const zoneTop = Math.max(headerBottom || 0, tableRect ? tableRect.top : 0);
+        const zoneBottom = Math.min(vh, tableRect ? tableRect.bottom : vh);
 
-        // Calculate visible height (how much of the card is between header and viewport bottom)
-        const visibleTop = Math.max(r.top, HEADER_HEIGHT);
-        const visibleBottom = Math.min(r.bottom, viewportHeight);
+        const visibleTop = Math.max(g.top, zoneTop);
+        const visibleBottom = Math.min(g.bottom, zoneBottom);
         const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-        // OUT OF ZONE: Less than 20px visible → hide to prevent frantic appearing
-        if (visibleHeight < 20) {
-            host.style.display = 'none';
+        // Hysteresis: separate hide/show thresholds to prevent flickering
+        const HIDE_PX = 12;
+        const SHOW_PX = 28;
+        const vis = INLINE_STATE.visibility;
+
+        if (!vis.hidden) {
+            if (visibleHeight < HIDE_PX) vis.hidden = true;
+        } else {
+            if (visibleHeight > SHOW_PX) vis.hidden = false;
+        }
+
+        // Use opacity + pointer-events for smoother transitions than display:none
+        if (vis.hidden || visibleHeight <= 0) {
+            host.style.opacity = '0';
+            host.style.pointerEvents = 'none';
             return 'out-of-zone';
         }
 
-        // IN ZONE: Position exactly at ghost location
-        host.style.display = '';
+        host.style.opacity = '1';
+        host.style.pointerEvents = 'auto';
+
+        // WINDOWING: Host becomes the visible clipping window
         host.style.position = 'fixed';
-        host.style.top = `${r.top}px`;
-        host.style.left = `${r.left}px`;
-        host.style.width = `${r.width}px`;
+        host.style.left = `${px(g.left)}px`;
+        host.style.top = `${px(visibleTop)}px`;
+        host.style.width = `${px(g.width)}px`;
+        host.style.height = `${px(visibleHeight)}px`;
+
         host.style.right = 'auto';
         host.style.bottom = 'auto';
+        host.style.overflow = 'hidden';
         host.style.zIndex = '2147483647';
-        host.style.overflow = 'hidden'; // Clip any overflow content
+        host.style.clipPath = 'none'; // No longer needed with windowing
 
-        // Use clipPath to hide portions outside the valid zone (top AND bottom)
-        // This creates smooth sliding effect at both ends
-        const clipTop = Math.max(0, HEADER_HEIGHT - r.top);
-        const clipBottom = Math.max(0, r.bottom - viewportHeight);
-
-        if (clipTop > 0 || clipBottom > 0) {
-            host.style.clipPath = `inset(${clipTop}px 0 ${clipBottom}px 0)`;
-        } else {
-            host.style.clipPath = 'none';
+        // Shift child via transform to maintain sync with ghost
+        const child = host.firstElementChild;
+        if (child) {
+            const dy = px(g.top - visibleTop); // Tracks relative offset
+            child.style.transform = `translate3d(0, ${dy}px, 0)`;
+            child.style.willChange = 'transform';
         }
 
         return 'positioned';
