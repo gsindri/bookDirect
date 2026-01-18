@@ -88,6 +88,22 @@
     }
 
     /**
+     * Round up (ceil) to prevent peeking above header
+     */
+    function pxCeil(v) {
+        const dpr = window.devicePixelRatio || 1;
+        return Math.ceil(v * dpr) / dpr;
+    }
+
+    /**
+     * Round down (floor) to prevent peeking below zone
+     */
+    function pxFloor(v) {
+        const dpr = window.devicePixelRatio || 1;
+        return Math.floor(v * dpr) / dpr;
+    }
+
+    /**
      * Check if two rects overlap horizontally
      */
     function rectsOverlapX(a, b) {
@@ -1840,12 +1856,18 @@
         const tableRect = INLINE_STATE.roomTableRoot?.getBoundingClientRect?.() || null;
         const headerBottom = getHeaderBottomForCard(g);
 
-        const zoneTop = Math.max(headerBottom || 0, tableRect ? tableRect.top : 0);
+        // Safety pad to avoid 1px header seam bleed
+        const SAFETY_PAD = 2;
+        const zoneTop = Math.max((headerBottom || 0) + SAFETY_PAD, tableRect ? tableRect.top : 0);
         const zoneBottom = Math.min(vh, tableRect ? tableRect.bottom : vh);
 
         const visibleTop = Math.max(g.top, zoneTop);
         const visibleBottom = Math.min(g.bottom, zoneBottom);
-        const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+        // Snap window edges in the "safe" direction (prevents 1px peeks)
+        const windowTop = pxCeil(visibleTop);
+        const windowBottom = pxFloor(visibleBottom);
+        const windowHeight = Math.max(0, windowBottom - windowTop);
 
         // Hysteresis: separate hide/show thresholds to prevent flickering
         const HIDE_PX = 12;
@@ -1853,13 +1875,13 @@
         const vis = INLINE_STATE.visibility;
 
         if (!vis.hidden) {
-            if (visibleHeight < HIDE_PX) vis.hidden = true;
+            if (windowHeight < HIDE_PX) vis.hidden = true;
         } else {
-            if (visibleHeight > SHOW_PX) vis.hidden = false;
+            if (windowHeight > SHOW_PX) vis.hidden = false;
         }
 
         // Use opacity + pointer-events for smoother transitions than display:none
-        if (vis.hidden || visibleHeight <= 0) {
+        if (vis.hidden || windowHeight <= 0) {
             host.style.opacity = '0';
             host.style.pointerEvents = 'none';
             return 'out-of-zone';
@@ -1871,9 +1893,9 @@
         // WINDOWING: Host becomes the visible clipping window
         host.style.position = 'fixed';
         host.style.left = `${px(g.left)}px`;
-        host.style.top = `${px(visibleTop)}px`;
+        host.style.top = `${windowTop}px`;
         host.style.width = `${px(g.width)}px`;
-        host.style.height = `${px(visibleHeight)}px`;
+        host.style.height = `${windowHeight}px`;
 
         host.style.right = 'auto';
         host.style.bottom = 'auto';
@@ -1884,7 +1906,7 @@
         // Shift child via transform to maintain sync with ghost
         const child = host.firstElementChild;
         if (child) {
-            const dy = px(g.top - visibleTop); // Tracks relative offset
+            const dy = px(g.top - windowTop); // Tracks relative offset
             child.style.transform = `translate3d(0, ${dy}px, 0)`;
             child.style.willChange = 'transform';
         }
@@ -1950,7 +1972,15 @@
         ghost.style.height = `${Math.max(0, Math.round(inlineRect.height))}px`;
 
         // Re-sync host position after ghost height change
-        applyInlineHostDocked(host, ghost);
+        const status = applyInlineHostDocked(host, ghost);
+
+        // If we're out-of-zone, DO NOT force-show the host (prevents peeking after scroll idle)
+        if (status === 'out-of-zone') {
+            host.style.display = '';              // keep in DOM, but applyInlineHostDocked already hid it
+            INLINE_STATE.mode = 'docked';         // keep syncing on future scrolls
+            INLINE_STATE.hasShown = true;         // don't re-run initial stability gate forever
+            return 'out-of-zone';
+        }
 
         // Check stability gate (initial-only)
         const isStable = checkInlineStability(ghost);
@@ -1963,15 +1993,14 @@
             return 'stabilizing';
         }
 
-        // Show the inline card (and let UI controller render state)
+        // Show the inline card (do NOT override host opacity/pointer-events here;
+        // applyInlineHostDocked controls visibility deterministically)
         if (uiController?.showInline) {
             uiController.showInline();
         } else {
             inlineEl.style.display = '';
         }
         host.style.display = '';
-        host.style.opacity = '1';
-        host.style.pointerEvents = 'auto';
 
         INLINE_STATE.mode = 'docked';
         INLINE_STATE.hasShown = true;  // Never hide again for this anchor
