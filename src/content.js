@@ -1874,10 +1874,14 @@
         const SHOW_PX = 28;
         const vis = INLINE_STATE.visibility;
 
+        // First-show bypass: if we've never shown and have a reasonable visible height, show immediately
+        const isFirstShow = !INLINE_STATE.hasShown && windowHeight > HIDE_PX;
+
         if (!vis.hidden) {
             if (windowHeight < HIDE_PX) vis.hidden = true;
         } else {
-            if (windowHeight > SHOW_PX) vis.hidden = false;
+            // Allow showing if above threshold OR first-show condition
+            if (windowHeight > SHOW_PX || isFirstShow) vis.hidden = false;
         }
 
         // Use opacity + pointer-events for smoother transitions than display:none
