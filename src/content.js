@@ -1760,42 +1760,48 @@
     /**
      * Apply button-docked positioning to inline host (over ghost)
      * Respects sticky room table header to prevent overlap
+     * Returns 'positioned' if card is placed, 'out-of-zone' if ghost is outside valid area
      */
     function applyInlineHostDocked(host, ghost) {
-        if (!host || !ghost) return;
+        if (!host || !ghost) return 'out-of-zone';
 
         const r = ghost.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
 
-        // Detect sticky room table header to clamp top position
-        // Look for sticky elements in the room table area
+        // Detect sticky room table header to determine minimum top boundary
         let headerBottom = 0;
         try {
-            // Try to find the room table's sticky header
-            const stickyHeaders = document.querySelectorAll('thead[style*="sticky"], tr[style*="sticky"], [class*="sticky"], [data-testid*="header"]');
+            // Try to find the room table's sticky header via computed style
+            const stickyHeaders = document.querySelectorAll('thead, [class*="sticky"], [data-testid*="header"]');
             for (const el of stickyHeaders) {
                 const style = getComputedStyle(el);
                 if (style.position === 'sticky' || style.position === 'fixed') {
                     const elRect = el.getBoundingClientRect();
-                    // Only consider headers that are near the top of viewport
-                    if (elRect.top >= 0 && elRect.top < 200) {
+                    // Only consider headers that are near the top of viewport (not hidden above)
+                    if (elRect.bottom > 0 && elRect.top < 150) {
                         headerBottom = Math.max(headerBottom, elRect.bottom);
                     }
                 }
             }
-
-            // Fallback: look for typical Booking.com room table header
-            if (headerBottom === 0) {
-                const roomTableHeader = document.querySelector('[data-testid="property-room-select-header"], [class*="room-table"] thead, [id*="room"] thead');
-                if (roomTableHeader) {
-                    const style = getComputedStyle(roomTableHeader);
-                    if (style.position === 'sticky' || style.position === 'fixed') {
-                        headerBottom = roomTableHeader.getBoundingClientRect().bottom;
-                    }
-                }
-            }
         } catch (e) {
-            // Ignore errors, use ghost position as-is
+            // Ignore errors
         }
+
+        // ZONE CHECKS: Hide card if ghost is outside valid display area
+        // 1. Ghost bottom is above the header (scrolled past) → hide
+        if (r.bottom < headerBottom + 20) {
+            host.style.display = 'none';
+            return 'out-of-zone';
+        }
+
+        // 2. Ghost top is below viewport (hasn't scrolled into view yet) → hide
+        if (r.top > viewportHeight) {
+            host.style.display = 'none';
+            return 'out-of-zone';
+        }
+
+        // Ghost is in valid zone - position the card
+        host.style.display = '';
 
         // Clamp top position to respect header boundary (with 4px buffer)
         const minTop = headerBottom > 0 ? headerBottom + 4 : 0;
@@ -1808,6 +1814,8 @@
         host.style.right = 'auto';
         host.style.bottom = 'auto';
         host.style.zIndex = '2147483647';
+
+        return 'positioned';
     }
 
     /**
