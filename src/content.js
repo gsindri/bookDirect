@@ -1759,13 +1759,50 @@
 
     /**
      * Apply button-docked positioning to inline host (over ghost)
+     * Respects sticky room table header to prevent overlap
      */
     function applyInlineHostDocked(host, ghost) {
         if (!host || !ghost) return;
 
         const r = ghost.getBoundingClientRect();
+
+        // Detect sticky room table header to clamp top position
+        // Look for sticky elements in the room table area
+        let headerBottom = 0;
+        try {
+            // Try to find the room table's sticky header
+            const stickyHeaders = document.querySelectorAll('thead[style*="sticky"], tr[style*="sticky"], [class*="sticky"], [data-testid*="header"]');
+            for (const el of stickyHeaders) {
+                const style = getComputedStyle(el);
+                if (style.position === 'sticky' || style.position === 'fixed') {
+                    const elRect = el.getBoundingClientRect();
+                    // Only consider headers that are near the top of viewport
+                    if (elRect.top >= 0 && elRect.top < 200) {
+                        headerBottom = Math.max(headerBottom, elRect.bottom);
+                    }
+                }
+            }
+
+            // Fallback: look for typical Booking.com room table header
+            if (headerBottom === 0) {
+                const roomTableHeader = document.querySelector('[data-testid="property-room-select-header"], [class*="room-table"] thead, [id*="room"] thead');
+                if (roomTableHeader) {
+                    const style = getComputedStyle(roomTableHeader);
+                    if (style.position === 'sticky' || style.position === 'fixed') {
+                        headerBottom = roomTableHeader.getBoundingClientRect().bottom;
+                    }
+                }
+            }
+        } catch (e) {
+            // Ignore errors, use ghost position as-is
+        }
+
+        // Clamp top position to respect header boundary (with 4px buffer)
+        const minTop = headerBottom > 0 ? headerBottom + 4 : 0;
+        const clampedTop = Math.max(r.top, minTop);
+
         host.style.position = 'fixed';
-        host.style.top = `${r.top}px`;
+        host.style.top = `${clampedTop}px`;
         host.style.left = `${r.left}px`;
         host.style.width = `${r.width}px`;
         host.style.right = 'auto';
