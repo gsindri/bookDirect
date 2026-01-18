@@ -1812,10 +1812,13 @@
         host.style.zIndex = '2147483647';
         host.style.overflow = 'hidden'; // Clip any overflow content
 
-        // Use clipPath to hide the portion above the header (creates smooth sliding effect)
+        // Use clipPath to hide portions outside the valid zone (top AND bottom)
+        // This creates smooth sliding effect at both ends
         const clipTop = Math.max(0, HEADER_HEIGHT - r.top);
-        if (clipTop > 0) {
-            host.style.clipPath = `inset(${clipTop}px 0 0 0)`;
+        const clipBottom = Math.max(0, r.bottom - viewportHeight);
+
+        if (clipTop > 0 || clipBottom > 0) {
+            host.style.clipPath = `inset(${clipTop}px 0 ${clipBottom}px 0)`;
         } else {
             host.style.clipPath = 'none';
         }
