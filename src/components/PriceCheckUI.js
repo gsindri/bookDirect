@@ -4795,21 +4795,13 @@ window.BookDirect.createUIController = function (options = {}) {
     showInline() {
       state.inlineVisible = true;
       renderInline();
-      // Auto-minimize panel when inline appears (unless pinned)
-      if (panelEl.minimizeIfNotPinned) {
-        panelEl.minimizeIfNotPinned();
-        state.panelState = panelEl.getPanelState?.() || 'minimized';
-      }
+      // Panel no longer auto-minimizes when inline appears; user controls it.
     },
 
     hideInline() {
       state.inlineVisible = false;
       inlineEl.style.display = 'none';
-      // Restore panel when inline hides
-      if (panelEl.expandIfMinimized) {
-        panelEl.expandIfMinimized();
-        state.panelState = panelEl.getPanelState?.() || 'expanded';
-      }
+      // Panel no longer auto-expands when inline hides.
     },
 
     setPanelState(newState) {

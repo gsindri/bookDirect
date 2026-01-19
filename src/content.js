@@ -1517,8 +1517,9 @@
 
         let topOffset = Math.max(MIN_OFFSET, headerBottom + HEADER_PADDING);
 
-        // Cap at reasonable maximum
-        topOffset = Math.min(topOffset, 200);
+        // Cap at tight maximum - don't let unrelated sticky elements push us too far down
+        const MAX_OFFSET = 96;  // Tune: 80-110 range usually feels right
+        topOffset = Math.min(topOffset, MAX_OFFSET);
 
         host.style.position = 'fixed';
         host.style.right = '16px';
@@ -1673,15 +1674,12 @@
 
         console.log('[bookDirect][findInlineAnchorButton] Room table root:', roomTableRoot.tagName, roomTableRoot.className || roomTableRoot.id || '(no class/id)');
 
-        // Helper: check if element is in room table area (has .hprt-* ancestor)
+        // Helper: check if element is in room table area
+        // LOOSENED: Uses roomTableRoot.contains() instead of .hprt-* ancestry check
+        // This supports newer Booking layouts that don't use .hprt-* classes
         const isInRoomTableArea = (el) => {
-            // Check if element has any .hprt- prefixed class ancestor
-            for (let p = el; p && p !== document.body; p = p.parentElement) {
-                if (p.className && typeof p.className === 'string' && p.className.includes('hprt')) {
-                    return true;
-                }
-            }
-            return false;
+            if (!el || !roomTableRoot) return false;
+            return roomTableRoot.contains(el);
         };
 
         // STICKY: If current anchor still valid, keep it (prevents jumping)
@@ -2165,7 +2163,12 @@
             didFirstScrollRepair = true;
             setTimeout(() => {
                 repairBookingLayout('first-scroll');
-                hiddenRedockNudge();
+
+                // Legacy-only: hiddenRedockNudge moves the panel through the old placer.
+                // When using the two-surface controller it breaks the overlay layout.
+                if (!uiController) {
+                    hiddenRedockNudge();
+                }
             }, 0);
         }
 
